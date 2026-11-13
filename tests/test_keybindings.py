@@ -5,11 +5,18 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
-from pyde import jsonc
+from pyde import jsonc, keybindings
 from pyde.commands import CommandRegistry
-from pyde.keybindings import Keybindings, to_key_sequence
+from pyde.keybindings import Keybindings, modifiers_for, to_key_sequence
 
 PORTABLE = QKeySequence.SequenceFormat.PortableText
+NATIVE = QKeySequence.SequenceFormat.NativeText
+
+
+@pytest.fixture(autouse=True)
+def mac_modifiers(monkeypatch):
+    """Read keys the way a Mac does, whatever system the tests run on."""
+    monkeypatch.setattr(keybindings, "_MODIFIERS", modifiers_for("darwin"))
 
 
 @pytest.mark.parametrize(
@@ -39,6 +46,16 @@ def test_keys_translate_to_qt_sequences(qapp, key, qt_spelling):
 def test_invalid_keys_are_rejected(qapp, key):
     with pytest.raises(ValueError):
         to_key_sequence(key)
+
+
+def test_without_a_command_key_both_names_mean_control(qapp, monkeypatch):
+    assert modifiers_for("darwin")["ctrl"] == "Meta"
+    assert modifiers_for("win32")["ctrl"] == "Ctrl"
+    monkeypatch.setattr(keybindings, "_MODIFIERS", modifiers_for("win32"))
+
+    assert to_key_sequence("cmd+p").toString(PORTABLE) == "Ctrl+P"
+    assert to_key_sequence("ctrl+`").toString(PORTABLE) == "Ctrl+`"
+    assert to_key_sequence("cmd+k cmd+s").toString(PORTABLE) == "Ctrl+K, Ctrl+S"
 
 
 class Harness:
@@ -120,8 +137,10 @@ def test_an_invalid_key_is_reported_and_the_default_is_kept(harness, value):
 def test_a_key_shared_by_two_commands_is_reported(harness):
     harness.load('{"demo.two": "cmd+1"}')
 
+    # Shown the way this system writes keys: ⌘1 on a Mac.
+    key = QKeySequence("Ctrl+1").toString(NATIVE)
     assert harness.messages == [
-        "keybindings.json: ⌘1 is bound to both demo.one and demo.two"
+        f"keybindings.json: {key} is bound to both demo.one and demo.two"
     ]
 
 

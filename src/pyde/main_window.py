@@ -41,7 +41,11 @@ MODIFIED_MARK = " •"
 
 
 def default_config_dir() -> Path:
-    """Where the user's settings live: ~/Library/Application Support/Pyde."""
+    """Where the user's settings live.
+
+    That is ~/Library/Application Support/Pyde on macOS, and %APPDATA%\\Pyde
+    on Windows.
+    """
     location = QStandardPaths.StandardLocation.AppDataLocation
     return Path(QStandardPaths.writableLocation(location))
 

@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 import pytest
 from PySide6.QtCore import Qt
@@ -9,6 +10,10 @@ from PySide6.QtWidgets import QApplication
 
 from pyde import terminal as terminal_module
 from pyde.terminal import TerminalView, default_shell, shell_environment
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="types Unix shell commands into the terminal"
+)
 
 # Everything on the terminal's screen and in its scrollback, with lines that
 # xterm.js wrapped joined back together.
@@ -337,3 +342,38 @@ def test_the_environment_can_start_from_another_one():
     assert env["ONLY"] == "this"
     assert env["TERM"] == "xterm-256color"
     assert "HOME" not in env
+
+
+def test_on_windows_the_shell_is_powershell_or_the_command_prompt(monkeypatch):
+    monkeypatch.setattr(terminal_module.sys, "platform", "win32")
+    monkeypatch.setenv("COMSPEC", "C:\\Windows\\System32\\cmd.exe")
+    programs = {"powershell": "C:\\Windows\\powershell.exe"}
+    monkeypatch.setattr(terminal_module.shutil, "which", programs.get)
+
+    assert terminal_module.default_shell_command() == [
+        "C:\\Windows\\powershell.exe",
+        "-NoLogo",
+    ]
+
+    programs.clear()
+    assert terminal_module.default_shell_command() == ["C:\\Windows\\System32\\cmd.exe"]
+
+
+def test_on_macos_the_shell_is_started_as_a_login_shell(monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/example")
+
+    assert terminal_module.default_shell_command() == ["/bin/example", "-l"]
+
+
+def test_no_locale_is_supplied_on_windows(monkeypatch):
+    for name in ("LC_ALL", "LC_CTYPE", "LANG"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(terminal_module.sys, "platform", "win32")
+
+    assert "LANG" not in shell_environment()
+
+
+def test_the_terminal_knows_once_its_shell_has_written_something(harness):
+    harness.wait_for("$")
+
+    assert harness.view.has_output

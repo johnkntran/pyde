@@ -1,7 +1,14 @@
 import os
 import subprocess
+import sys
+
+import pytest
 
 from pyde.shell_env import environment_command, parse_environment
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="asks a Unix shell for its environment"
+)
 
 
 def test_the_command_runs_the_shell_as_a_login_and_interactive_one():
