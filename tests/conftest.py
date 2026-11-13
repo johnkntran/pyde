@@ -239,6 +239,8 @@ class FakeDocker:
 @pytest.fixture
 def fake_docker(tmp_path, monkeypatch):
     """Put the stand-in docker first on the PATH."""
+    if sys.platform == "win32":
+        pytest.skip("the stand-in docker is a Unix script")
     fake = FakeDocker(tmp_path / "fake-docker")
     monkeypatch.setenv("PATH", f"{fake.bin}{os.pathsep}{os.environ['PATH']}")
     return fake

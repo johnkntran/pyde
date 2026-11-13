@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 import pytest
 from PySide6.QtCore import Qt
@@ -9,6 +10,10 @@ from PySide6.QtWidgets import QApplication
 
 from pyde import terminal as terminal_module
 from pyde.terminal import TerminalView, default_shell, shell_environment
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="types Unix shell commands into the terminal"
+)
 
 # Everything on the terminal's screen and in its scrollback, with lines that
 # xterm.js wrapped joined back together.

@@ -17,6 +17,8 @@ GIT_TIMEOUT_SECONDS = 10
 def list_files(folder: Path) -> list[str]:
     """The files under a folder, as sorted paths relative to it.
 
+    The paths use "/" between folders on every system, as Git's do.
+
     In a Git repository these are the files Git tracks, plus the new ones it
     does not ignore. Anywhere else, or if Git cannot be run, they are whatever
     a walk of the folder finds outside the usual clutter.
@@ -49,7 +51,7 @@ def _walk(folder: Path) -> list[str]:
         folders[:] = sorted(set(folders) - SKIPPED_FOLDERS)
         for name in files:
             if name not in SKIPPED_FILES:
-                paths.append(os.path.relpath(os.path.join(parent, name), folder))
+                paths.append(Path(parent, name).relative_to(folder).as_posix())
         if len(paths) >= MAX_WALKED_FILES:
             break
     return sorted(paths)

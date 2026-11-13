@@ -1,7 +1,8 @@
 """The terminal panel: xterm.js in a web view, attached to a shell."""
 
 import os
-import pwd
+import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -33,7 +34,25 @@ EXITED_NOTICE = "\r\n[The shell has exited. Press Return to start a new one.]\r\
 
 def default_shell() -> str:
     """The user's own shell."""
+    if sys.platform == "win32":
+        # PowerShell where there is one, and otherwise the Command Prompt.
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        return powershell or os.environ.get("COMSPEC", "cmd.exe")
+    import pwd
+
     return os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell
+
+
+def default_shell_command() -> list[str]:
+    """The command that starts the user's own shell the way a terminal does."""
+    shell = default_shell()
+    if sys.platform != "win32":
+        # As a login shell, so that it reads the user's profile and finds the
+        # same tools their terminal does.
+        return [shell, "-l"]
+    if "powershell" in Path(shell).name.lower() or "pwsh" in Path(shell).name.lower():
+        return [shell, "-NoLogo"]
+    return [shell]
 
 
 def shell_environment(base: dict[str, str] | None = None) -> dict[str, str]:
@@ -50,8 +69,10 @@ def shell_environment(base: dict[str, str] | None = None) -> dict[str, str]:
         TERM_PROGRAM_VERSION=__version__,
     )
     # An app launched from the Finder has no locale in its environment, and
-    # without a UTF-8 one a shell garbles anything that is not ASCII.
-    if not any(env.get(name) for name in ("LC_ALL", "LC_CTYPE", "LANG")):
+    # without a UTF-8 one a shell garbles anything that is not ASCII. Windows
+    # does not use these variables.
+    has_locale = any(env.get(name) for name in ("LC_ALL", "LC_CTYPE", "LANG"))
+    if sys.platform != "win32" and not has_locale:
         language = QLocale.system().name()
         # Qt answers "C" when it cannot tell, and macOS has no C.UTF-8 locale
         # on older versions.
@@ -216,7 +237,7 @@ class TerminalView(QWebEngineView):
         if self._task is not None:
             argv, env, _ = self._task
         else:
-            argv = self._shell or [default_shell(), "-l"]
+            argv = self._shell or default_shell_command()
             env = self._shell_env or shell_environment()
         self._session.start(argv, self.folder, env, *self._size)
 

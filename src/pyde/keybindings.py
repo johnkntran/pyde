@@ -11,6 +11,7 @@ The file is watched, so changes apply as soon as it is saved.
 """
 
 import json
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, Signal
@@ -19,15 +20,26 @@ from PySide6.QtGui import QKeySequence
 from pyde import jsonc
 from pyde.commands import CommandRegistry
 
-# The file names modifiers the way a Mac keyboard does. Qt names them
-# differently on macOS: its "Ctrl" is the Command key and its "Meta" is Control.
-_MODIFIERS = {
-    "cmd": "Ctrl",
-    "ctrl": "Meta",
-    "alt": "Alt",
-    "option": "Alt",
-    "shift": "Shift",
-}
+
+def modifiers_for(platform: str) -> dict[str, str]:
+    """What Qt calls each modifier the keybindings file can name.
+
+    The file names modifiers the way a Mac keyboard does. On macOS Qt names
+    them differently: its "Ctrl" is the Command key and its "Meta" is Control.
+    Other keyboards have no Command key, and what a Mac does with it they do
+    with Control, so there both names mean Control.
+    """
+    control = "Meta" if platform == "darwin" else "Ctrl"
+    return {
+        "cmd": "Ctrl",
+        "ctrl": control,
+        "alt": "Alt",
+        "option": "Alt",
+        "shift": "Shift",
+    }
+
+
+_MODIFIERS = modifiers_for(sys.platform)
 # Names that Qt spells differently, or reads as a different key: its "Enter" is
 # the one on the numeric keypad.
 _KEY_ALIASES = {"enter": "Return", "pageup": "PgUp", "pagedown": "PgDown"}

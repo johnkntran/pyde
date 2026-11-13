@@ -1,13 +1,15 @@
 name: CI
 
-# Pull requests get linted, tested, and packaged. A new version tag such as
-# v0.1.0 does the same, building the app as version 0.1.0, and then publishes
-# the disk image to that tag's GitHub Release, creating the release if it does
-# not exist yet.
+# Pull requests get linted, tested, and packaged, for macOS and for Windows. A
+# new version tag such as v0.1.0 does the same, building the app as version
+# 0.1.0, and then publishes the macOS disk image and the Windows zip to that
+# tag's GitHub Release, creating the release if it does not exist yet.
 on:
   pull_request:
   push:
     tags: ["v*"]
+    # TEMPORARY, while the Windows build is being brought up on this branch.
+    branches: [windows-build]
 
 permissions:
   contents: read
@@ -19,6 +21,8 @@ jobs:
     # another chance for the run to fail. macos-latest is Apple Silicon, the
     # only architecture Pyde ships for.
     runs-on: macos-latest
+    # TEMPORARY: branch pushes are for the Windows job only.
+    if: github.ref_name != 'windows-build'
     steps:
       - uses: actions/checkout@v7
       # setup-uv publishes no floating major tag, so it is pinned to a release.
@@ -40,24 +44,56 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-windows:
+    runs-on: windows-latest
+    # Windows is the second platform. A failure here shows on the run, but
+    # does not hold up the macOS release.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      # setup-uv publishes no floating major tag, so it is pinned to a release.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv sync --locked
+      - run: uv run pytest
+      - name: Take the version from the tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: uv version "${GITHUB_REF_NAME#v}"
+      - run: scripts/build_windows.ps1
+      - name: Smoke-test the packaged app
+        # Pyde.exe is a windowed program, which a shell does not wait for
+        # unless told to.
+        run: |
+          $app = Start-Process dist\Pyde\Pyde.exe -ArgumentList "--smoke-test" -Wait -PassThru
+          exit $app.ExitCode
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     if: github.ref_type == 'tag'
-    needs: build
+    needs: [build, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # Every artifact the build jobs uploaded, side by side in this folder.
       - uses: actions/download-artifact@v8
         with:
-          name: dmg
-      - name: Publish the disk image to the GitHub Release
+          merge-multiple: true
+      - name: Publish the downloads to the GitHub Release
         # Creating a release on GitHub's website also creates its tag, so the
-        # release may already exist by the time this runs.
+        # release may already exist by the time this runs. The Windows zip is
+        # absent if its job failed.
         run: |
+          files=$(ls *.dmg *.zip 2> /dev/null)
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" *.dmg --clobber
+            gh release upload "$GITHUB_REF_NAME" $files --clobber
           else
-            gh release create "$GITHUB_REF_NAME" *.dmg --generate-notes --verify-tag
+            gh release create "$GITHUB_REF_NAME" $files --generate-notes --verify-tag
           fi
         env:
           GH_TOKEN: ${{ github.token }}
