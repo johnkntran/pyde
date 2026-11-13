@@ -18,6 +18,8 @@ trap 'rm -rf "$staging"' EXIT
 ditto dist/Pyde.app "$staging/Pyde.app"
 ln -s /Applications "$staging/Applications"
 
-hdiutil create -volname "Pyde $version" -srcfolder "$staging" -format UDZO "$dmg"
+# diskutil replaces hdiutil, which macOS 27 deprecates.
+diskutil image create from --format UDZO --volumeName "Pyde $version" \
+  "$staging" "$dmg"
 
 echo "Built $dmg"
