@@ -4,16 +4,21 @@ import argparse
 import sys
 from pathlib import Path
 
+from pygments.styles import get_style_by_name
+from pygments.util import ClassNotFound
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from pyde import __version__
+from pyde.highlighter import DARK_STYLE, LIGHT_STYLE, lexer_for
 
 # Importing the window also imports QtWebEngine, which Qt requires to happen
 # before the QApplication is created.
 from pyde.main_window import MainWindow
 
 SMOKE_TEST_TIMEOUT_MS = 30_000
+# One file name for each of the Pygments lexer modules worth checking.
+SMOKE_TEST_FILE_NAMES = ("a.py", "a.json", "a.toml", "a.html", "a.md", "Dockerfile")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--smoke-test",
         action="store_true",
-        help="start, wait for the web engine to load a page, then exit; "
+        help="start, check the web engine and syntax highlighting, then exit; "
         "used to verify packaged builds",
     )
     parser.add_argument(
@@ -38,18 +43,43 @@ def main(argv: list[str] | None = None) -> int:
     if args.path:
         window.open_path(args.path)
     if args.smoke_test:
-        _exit_when_web_view_loads(app, window)
+        _run_smoke_test(app, window)
     window.show()
     return app.exec()
 
 
-def _exit_when_web_view_loads(app: QApplication, window: MainWindow) -> None:
-    """Exit 0 once the web view has loaded its page, 1 on failure or timeout."""
+def _run_smoke_test(app: QApplication, window: MainWindow) -> None:
+    """Exit 0 if the parts a packaged build is most likely to lack all work.
 
-    def finish(ok: bool) -> None:
-        if not ok:
-            print("smoke test failed: the web view did not load", file=sys.stderr)
-        app.exit(0 if ok else 1)
+    Those are the parts loaded by name at run time, which PyInstaller cannot
+    see when it decides what to bundle: the web engine's helper process and
+    page, and Pygments' lexers and styles.
+    """
+    problems = _highlighting_problems()
+
+    def finish(loaded: bool) -> None:
+        if not loaded:
+            problems.append("the web view did not load")
+        for problem in problems:
+            print(f"smoke test failed: {problem}", file=sys.stderr)
+        app.exit(1 if problems else 0)
 
     window.terminal_view.loadFinished.connect(finish)
     QTimer.singleShot(SMOKE_TEST_TIMEOUT_MS, lambda: finish(False))
+
+
+def _highlighting_problems() -> list[str]:
+    problems = []
+    for name in SMOKE_TEST_FILE_NAMES:
+        try:
+            lexer = lexer_for(name)
+        except ImportError:
+            lexer = None
+        if lexer is None:
+            problems.append(f"no syntax highlighting for {name}")
+    for style in (LIGHT_STYLE, DARK_STYLE):
+        try:
+            get_style_by_name(style)
+        except ClassNotFound:
+            problems.append(f"the {style} color style is missing")
+    return problems

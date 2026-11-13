@@ -15,6 +15,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
 
+from pyde.highlighter import SyntaxHighlighter, lexer_for
+
 INDENT_WIDTH = 4
 FONT_SIZE = 13
 # Space between the line numbers and the edges of their gutter.
@@ -46,6 +48,8 @@ class CodeEditor(QPlainTextEdit):
         # typing keep to the file's own style.
         self._newline = "\n"
         self._indent = " " * INDENT_WIDTH
+        # Colors the text; None while the file's language is unknown.
+        self._highlighter: SyntaxHighlighter | None = None
 
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         font.setPointSize(FONT_SIZE)
@@ -78,6 +82,7 @@ class CodeEditor(QPlainTextEdit):
         self._indent = "\t" if uses_tabs else " " * INDENT_WIDTH
         self.setPlainText(text.replace("\r\n", "\n"))
         self.path = path
+        self._highlight_for_path()
 
     def save(self, path: Path | None = None) -> None:
         """Write the contents to the file, or to a new path. Raises OSError."""
@@ -85,8 +90,21 @@ class CodeEditor(QPlainTextEdit):
         text = self.toPlainText().replace("\n", self._newline)
         with open(path, "w", encoding="utf-8", newline="") as file:
             file.write(text)
+        renamed = path != self.path
         self.path = path
         self.document().setModified(False)
+        if renamed:
+            self._highlight_for_path()
+
+    def _highlight_for_path(self) -> None:
+        """Color the text as the language that the file's name implies."""
+        if self._highlighter is not None:
+            self._highlighter.setDocument(None)
+            self._highlighter.deleteLater()
+            self._highlighter = None
+        lexer = lexer_for(self.path.name, self.toPlainText())
+        if lexer is not None:
+            self._highlighter = SyntaxHighlighter(self.document(), lexer)
 
     # Line numbers
 

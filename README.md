@@ -1,7 +1,7 @@
 # Pyde - The code editor written in Python
 
-Pyde is a desktop code editor built with Python and Qt (PySide6). It targets
-macOS 14 or later on Apple Silicon.
+Pyde is a desktop code editor built with Python and Qt (PySide6), with syntax
+highlighting by Pygments. It targets macOS 14 or later on Apple Silicon.
 
 ## Install
 
@@ -77,3 +77,10 @@ release a few minutes later.
 
 The tag is the only place the version is set: `v0.2.0` builds Pyde 0.2.0. The
 version in `pyproject.toml` is a placeholder that development builds report.
+
+## Credits
+
+Pyde's syntax highlighter adapts code from
+[qtconsole](https://github.com/jupyter/qtconsole) and
+[Pygments](https://pygments.org), both BSD-licensed. Their license texts are in
+`src/pyde/licenses/` and ship inside the app.
