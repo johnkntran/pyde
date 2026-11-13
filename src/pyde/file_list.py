@@ -36,7 +36,8 @@ def list_files(folder: Path) -> list[str]:
             listing,
             cwd=folder,
             capture_output=True,
-            text=True,
+            # Git writes names in UTF-8 whatever the system's own encoding.
+            encoding="utf-8",
             check=True,
             timeout=GIT_TIMEOUT_SECONDS,
         )
