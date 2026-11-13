@@ -38,13 +38,18 @@ the embedded web engine to load a page, and exits with status 0 on success.
 
 1. Bump the version with `uv version --bump patch` (or `minor`, `major`) and
    merge that change into `main`.
-2. Tag the merged commit and push the tag:
+2. Create the matching tag, such as `v0.1.0`, in either of two ways:
 
-   ```sh
-   git tag v0.1.0
-   git push origin v0.1.0
-   ```
+   - On GitHub, draft a new release that creates the tag. Your title and
+     notes are kept.
+   - From the command line, push the tag. The release is created for you with
+     generated notes.
 
-GitHub Actions then tests the code, builds the `.dmg`, and publishes it as a
-GitHub Release. The tag has to match the version in `pyproject.toml`, or the
-build stops before publishing.
+     ```sh
+     git tag v0.1.0
+     git push origin v0.1.0
+     ```
+
+GitHub Actions then tests the code, builds the `.dmg`, and attaches it to the
+release a few minutes later. The tag has to match the version in
+`pyproject.toml`, or the build stops before publishing.
