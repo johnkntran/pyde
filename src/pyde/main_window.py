@@ -153,6 +153,7 @@ class MainWindow(QMainWindow):
                 "Reopen Folder Locally",
                 self.reopen_locally,
             ),
+            ("devcontainer.rebuild", "Rebuild Container", self.rebuild_container),
             ("file.save", "Save", self.save, "cmd+s"),
             ("file.saveAs", "Save As…", self.save_as, "cmd+shift+s"),
             ("file.closeTab", "Close Tab", self.close_tab, "cmd+w"),
@@ -314,7 +315,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if all(self._may_close(editor) for editor in self.editors()):
-            self._leave_container()
+            self._leave_container(quitting=True)
             self.terminal_view.shutdown()
             event.accept()
         else:
@@ -402,24 +403,36 @@ class MainWindow(QMainWindow):
 
     # Dev containers
 
-    def reopen_in_container(self) -> None:
+    def reopen_in_container(self, rebuild: bool = False) -> None:
         """Bring the folder's dev container up and move the terminal into it.
 
         The files are still edited where they are: a dev container mounts the
         folder, so only what runs, which is the terminal, moves.
         """
+        # The file may have been edited since the folder was opened.
+        self._offer_container()
         if self._container_config is None:
-            self._report("This folder has no dev container configuration Pyde can use")
+            if self.notice_bar.isHidden():
+                self._report("This folder has no dev container configuration")
             return
-        self._leave_container()
+        # About to bring it up again, so leave the containers running.
+        self._leave_container(stop=False)
         self.dev_container = DevContainer(
             self._container_config, self.terminal_view, self._config_dir, parent=self
         )
         self.dev_container.connected.connect(self._container_connected)
         self.dev_container.failed.connect(self._container_failed)
+        self.dev_container.warned.connect(self.notice_bar.show_notice)
         self.notice_bar.show_notice("Starting the dev container…")
         self.terminal_dock.show()
-        self.dev_container.start()
+        self.dev_container.start(rebuild)
+
+    def rebuild_container(self) -> None:
+        """Build the images again and replace the containers with new ones.
+
+        The lifecycle commands that run once per container then run again.
+        """
+        self.reopen_in_container(rebuild=True)
 
     def reopen_locally(self) -> None:
         """Leave the dev container and return the terminal to this Mac."""
@@ -433,7 +446,7 @@ class MainWindow(QMainWindow):
         """Tell the user if the open folder has a dev container configuration."""
         self._container_config = None
         self.notice_bar.hide()
-        path = find_config(self.folder)
+        path = find_config(self.folder) if self.folder else None
         if path is None:
             return
         try:
@@ -449,9 +462,9 @@ class MainWindow(QMainWindow):
             self.reopen_in_container,
         )
 
-    def _leave_container(self) -> None:
+    def _leave_container(self, stop: bool = True, quitting: bool = False) -> None:
         if self.dev_container is not None:
-            self.dev_container.leave()
+            self.dev_container.leave(stop, quitting)
             self.dev_container.deleteLater()
             self.dev_container = None
         self._in_container = False

@@ -27,6 +27,7 @@ LOW_WATER_MARK = 200_000
 
 # Erases the screen and scrollback, for a fresh start in a new folder.
 RESET = "\x1bc"
+BOLD, PLAIN = "\x1b[1m", "\x1b[0m"
 EXITED_NOTICE = "\r\n[The shell has exited. Press Return to start a new one.]\r\n"
 
 
@@ -171,8 +172,9 @@ class TerminalView(QWebEngineView):
         self._start()
 
     def show_message(self, text: str) -> None:
-        """Write a line of Pyde's own into the terminal."""
-        self._send(f"\r\n{text}\r\n")
+        """Write a line of Pyde's own into the terminal, in bold to set it
+        apart from the output of what runs there."""
+        self._send(f"\r\n{BOLD}{text}{PLAIN}\r\n")
 
     def focus_terminal(self) -> None:
         """Put keyboard focus in the terminal, ready to type a command."""

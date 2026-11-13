@@ -61,6 +61,7 @@ services:
   app:
     image: {IMAGE}
     command: sleep infinity
+    stop_grace_period: 1s
     volumes:
       - ..:/workspace
     environment:
@@ -68,6 +69,7 @@ services:
   helper:
     image: {IMAGE}
     command: sleep infinity
+    stop_grace_period: 1s
 """
     )
     (folder / ".devcontainer" / "devcontainer.json").write_text(
@@ -80,6 +82,15 @@ services:
   "workspaceFolder": "/workspace",
   "containerEnv": { "FROM_DEVCONTAINER": "${localWorkspaceFolderBasename}" },
   "remoteEnv": { "GREETING": "hello", "MORE": "${containerEnv:FROM_COMPOSE}-more" },
+  // Each lifecycle command adds a line to a log in the shared folder.
+  "initializeCommand": "echo initialize-on-$(uname) >> log.txt",
+  "onCreateCommand": "echo create >> log.txt",
+  "postCreateCommand": {
+    "first": "echo post-create-$GREETING >> log.txt",
+    "second": ["sh", "-c", "echo post-create-list >> log.txt"],
+  },
+  "postStartCommand": "echo start >> log.txt",
+  "postAttachCommand": "echo attach-as-$(id -un)-in-$PWD >> log.txt",
 }
 """
     )
@@ -109,18 +120,24 @@ def test_reopen_in_container_with_a_real_docker(qapp, tmp_path, project, wait_un
         wait_until(lambda: results)
         return results[0]
 
-    # The first run may have to pull the image.
+    def log():
+        return (project / "log.txt").read_text().split()
+
+    def wait_until_connected():
+        # The first run may have to pull the image.
+        wait_until(
+            lambda: (
+                window.container_label.isVisibleTo(window)
+                or "did not start" in window.notice_bar.label.text()
+            ),
+            timeout=300,
+        )
+        assert window.container_label.text() == "Dev Container: Real", (
+            window.notice_bar.label.text() + screen()
+        )
+
     window.notice_bar.action_button.click()
-    wait_until(
-        lambda: (
-            window.container_label.isVisibleTo(window)
-            or "did not start" in window.notice_bar.label.text()
-        ),
-        timeout=300,
-    )
-    assert window.container_label.text() == "Dev Container: Real", (
-        window.notice_bar.label.text() + screen()
-    )
+    wait_until_connected()
 
     # Both services are up, named the way VS Code would name them.
     name = f"{project.name}_devcontainer"
@@ -128,6 +145,19 @@ def test_reopen_in_container_with_a_real_docker(qapp, tmp_path, project, wait_un
         f"{name}-app-1",
         f"{name}-helper-1",
     ]
+
+    # Every lifecycle command ran, in order: the first on the Mac, the rest in
+    # the container, as its user, in the workspace folder, with remoteEnv set.
+    first_run = [
+        "initialize-on-Darwin",
+        "create",
+        "post-create-hello",
+        "post-create-list",
+        "start",
+        "attach-as-root-in-/workspace",
+    ]
+    assert log() == first_run
+    assert window.notice_bar.isHidden()
 
     # The terminal is a shell inside the service's container.
     command = (
@@ -150,6 +180,20 @@ def test_reopen_in_container_with_a_real_docker(qapp, tmp_path, project, wait_un
         "inspect", f"{name}-app-1", "--format", "{{json .Config.Labels}}"
     ).stdout
     assert json.loads(labels)["devcontainer.local_folder"] == str(project)
+
+    # Leaving stops the containers. Coming back starts the same ones again, so
+    # only the commands for every start and every attach run.
+    window.commands["devcontainer.reopenLocally"].action.trigger()
+    window.notice_bar.action_button.click()
+    wait_until_connected()
+    again = ["initialize-on-Darwin", "start", "attach-as-root-in-/workspace"]
+    assert log() == first_run + again
+
+    # Rebuilding replaces the containers, so everything runs again.
+    window.commands["devcontainer.rebuild"].action.trigger()
+    wait_until(lambda: len(log()) == len(first_run) * 2 + len(again), timeout=120)
+    wait_until_connected()
+    assert log() == first_run + again + first_run
 
     # Closing the window stops the containers, but leaves them in place.
     window.close()

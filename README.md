@@ -37,14 +37,26 @@ goes back.
 
 - **Read from `devcontainer.json`:** `dockerComposeFile`, `service`,
   `runServices`, `workspaceFolder`, `remoteUser`, `containerEnv`, `remoteEnv`,
-  `mounts`, `overrideCommand`, and `shutdownAction`, with variables such as
-  `${localWorkspaceFolder}`, `${localEnv:NAME}`, and `${containerEnv:NAME}`.
+  `mounts`, `overrideCommand`, `shutdownAction`, and the lifecycle commands,
+  with variables such as `${localWorkspaceFolder}`, `${localEnv:NAME}`, and
+  `${containerEnv:NAME}`.
+- **Lifecycle commands** run in the terminal before the shell opens.
+  `initializeCommand` runs on your Mac; the rest run in the container.
+  `onCreateCommand`, `updateContentCommand`, and `postCreateCommand` run once
+  per container, `postStartCommand` once each time it starts, and
+  `postAttachCommand` every time you reopen in it. A command that fails is
+  tried again next time. Where the specification runs an object of commands
+  side by side, Pyde runs them one after another.
+- **Rebuild Container**, in the File menu, builds the images again and
+  replaces the containers, so the once-per-container commands run again. Use
+  it after changing a Dockerfile or the Compose file.
 - **Not supported:** configurations based on an `image` or a Dockerfile,
   Features, and `forwardPorts`; publish ports in your Compose file instead.
-  The lifecycle commands, such as `postCreateCommand`, are not run yet.
   `customizations` are for other editors and are ignored.
 - **Shared with VS Code:** Pyde gives the Compose project the same name and
-  labels VS Code does, so the two use the same containers.
+  labels VS Code does, so the two use the same containers. Each keeps its own
+  record of which lifecycle commands have run, so the first time Pyde opens a
+  container VS Code created, the once-per-container commands run again.
 - **On close:** the containers are stopped, unless `shutdownAction` is
   `"none"`.
 

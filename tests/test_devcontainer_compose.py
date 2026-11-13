@@ -18,10 +18,14 @@ def configure(folder, compose_file="docker-compose.yml", **properties):
     return load_config(path, folder)
 
 
+CREATED, STARTED = "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"
+
+
 def inspected(env=(), labels=None, running=True):
     """What `docker inspect` says about a container."""
     return {
-        "State": {"Running": running},
+        "Created": CREATED,
+        "State": {"Running": running, "StartedAt": STARTED},
         "Config": {"Env": list(env), "Labels": labels or {}},
     }
 
@@ -158,6 +162,18 @@ def test_up_leaves_an_existing_container_as_it_is(tmp_path):
     assert command[-1] == "--no-recreate"
 
 
+def test_a_rebuild_builds_again_and_replaces_the_containers(tmp_path):
+    config = configure(tmp_path)
+
+    for container_exists in (True, False):
+        command = compose.up_command(
+            DOCKER, "proj", config, "o.json", container_exists, rebuild=True
+        )
+
+        assert command[-2:] == ["--build", "--force-recreate"]
+        assert "--no-recreate" not in command
+
+
 @pytest.mark.parametrize(
     ("run_services", "started"),
     [(["db"], ["db", "app"]), (["app", "db"], ["app", "db"])],
@@ -203,7 +219,7 @@ def test_the_shell_command_opens_a_terminal_in_the_workspace_folder(tmp_path):
         "/workspace",
     ]
     assert "--user" not in command
-    assert command[-4:-1] == ["abc123", "/bin/sh", "-c"]
+    assert command[-5:-2] == ["abc123", "/bin/sh", "-c"]
     assert "--env" in command and "TERM=xterm-256color" in command
 
 
@@ -248,7 +264,7 @@ def test_a_null_variable_is_unset_and_an_odd_name_is_skipped(tmp_path):
     command = compose.shell_command(DOCKER, "abc123", config, inspected())
 
     assert "KEEP=yes" in command
-    assert command[-1].startswith("unset GONE; ")
+    assert command[-2].startswith("unset GONE; ")
     assert not any("bad name" in argument for argument in command)
 
 
@@ -272,3 +288,85 @@ def test_a_single_object_of_metadata_counts_as_one_piece(tmp_path):
 def test_is_running_reads_the_container_state():
     assert compose.is_running(inspected(running=True))
     assert not compose.is_running(inspected(running=False))
+
+
+# Lifecycle commands
+
+
+def test_a_string_hook_is_handed_to_a_shell_and_recorded_when_it_succeeds(tmp_path):
+    config = configure(tmp_path, workspaceFolder="/workspace", remoteUser="ada")
+
+    command = compose.hook_command(
+        DOCKER, "abc123", config, inspected(), "pip install -e .", "postCreateCommand"
+    )
+
+    # It runs like the shell does: in a terminal, as the user, in the folder.
+    assert command[:8] == [
+        DOCKER,
+        "exec",
+        "--interactive",
+        "--tty",
+        "--user",
+        "ada",
+        "--workdir",
+        "/workspace",
+    ]
+    script_at = command.index("-c") + 1
+    assert command[script_at - 3 : script_at] == ["abc123", "/bin/sh", "-c"]
+    assert command[script_at + 1 :] == [
+        "pyde",
+        ".postCreateCommandMarker",
+        CREATED,
+        "shell",
+        "pip install -e .",
+    ]
+
+
+def test_a_list_hook_is_run_directly_with_its_arguments_intact(tmp_path):
+    config = configure(tmp_path)
+
+    command = compose.hook_command(
+        DOCKER, "abc123", config, inspected(), ["echo", "two words"], "onCreateCommand"
+    )
+
+    assert command[command.index("pyde") + 3 :] == ["exec", "echo", "two words"]
+
+
+def test_the_start_hook_is_stamped_with_when_the_container_started(tmp_path):
+    config = configure(tmp_path)
+
+    command = compose.hook_command(
+        DOCKER, "abc123", config, inspected(), "true", "postStartCommand"
+    )
+
+    marker, stamp = command[command.index("pyde") + 1 :][:2]
+    assert (marker, stamp) == (".postStartCommandMarker", STARTED)
+
+
+def test_a_hook_that_runs_every_time_records_nothing(tmp_path):
+    config = configure(tmp_path)
+
+    command = compose.hook_command(DOCKER, "abc123", config, inspected(), "true")
+
+    assert command[command.index("pyde") + 1 :] == ["", "", "shell", "true"]
+
+
+def test_the_stale_hooks_command_lists_each_once_only_hook_with_its_stamp(tmp_path):
+    config = configure(tmp_path, remoteUser="ada")
+
+    command = compose.stale_hooks_command(DOCKER, "abc123", config, inspected())
+
+    # Its output is read by Pyde, so it has no terminal attached.
+    assert command[:5] == [DOCKER, "exec", "--user", "ada", "abc123"]
+    assert "--tty" not in command
+    assert command[command.index("markers") + 1 :] == [
+        f"onCreateCommand={CREATED}",
+        f"updateContentCommand={CREATED}",
+        f"postCreateCommand={CREATED}",
+        f"postStartCommand={STARTED}",
+    ]
+
+
+def test_a_host_command_is_a_shell_line_or_a_program_with_arguments():
+    assert compose.host_command("make setup") == ["/bin/sh", "-c", "make setup"]
+    assert compose.host_command(["make", "setup"]) == ["make", "setup"]

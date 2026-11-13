@@ -105,12 +105,31 @@ elif args[:1] == ["compose"] and "up" in args:
         print("fake docker: could not start", file=sys.stderr)
     sys.exit(code)
 elif args[:1] == ["compose"] and "stop" in args:
+    import time
+
+    time.sleep(float((state / "stop_seconds").read_text()))
     (state / "stopped").write_text("yes")
+    with open(state / "calls.jsonl", "a") as log:
+        log.write(json.dumps(["stop-finished"]) + "\\n")
 elif args[:1] == ["ps"]:
     if (state / "container").exists():
         print((state / "container").read_text())
 elif args[:1] == ["inspect"]:
     print((state / "inspect.json").read_text())
+elif args[:1] == ["exec"] and "markers" in args:
+    # Which once-only lifecycle hooks have yet to run.
+    print((state / "stale_hooks").read_text())
+elif args[:1] == ["exec"] and "pyde" in args and args[-1] != "pyde":
+    # A lifecycle command: the words after the script's name are the marker
+    # file, its stamp, the kind of command, and the command itself.
+    marker, stamp, kind, *command = args[args.index("pyde") + 1 :]
+    print("fake docker: ran", " ".join(command))
+    failing = (state / "failing_command").read_text()
+    if failing and failing in command:
+        sys.exit(9)
+    if marker:
+        with open(state / "recorded_hooks", "a") as recorded:
+            recorded.write(marker + "\\n")
 elif args[:1] == ["exec"]:
     # A local shell plays the part of the one inside the container. It gets
     # the variables that were passed with --env, so tests can look for them.
@@ -139,6 +158,14 @@ class FakeDocker:
         self.set_project({"name": "devcontainer", "services": {"app": {}}})
         self.set_container()
         self.set_up_exit_code(0)
+        self.set_stale_hooks(
+            "onCreateCommand",
+            "updateContentCommand",
+            "postCreateCommand",
+            "postStartCommand",
+        )
+        self.set_failing_command("")
+        self.set_stop_seconds(0)
 
     def set_project(self, project):
         """What `docker compose config` reports."""
@@ -147,8 +174,29 @@ class FakeDocker:
     def set_container(self, running=True, user="", env=(), labels=None):
         """What `docker inspect` reports about the service's container."""
         config = {"User": user, "Env": list(env), "Labels": labels or {}}
-        inspected = [{"State": {"Running": running}, "Config": config}]
+        state = {"Running": running, "StartedAt": "2026-01-02T00:00:00Z"}
+        inspected = [
+            {"Created": "2026-01-01T00:00:00Z", "State": state, "Config": config}
+        ]
         (self.state / "inspect.json").write_text(json.dumps(inspected))
+
+    def set_stale_hooks(self, *hooks):
+        """The once-only lifecycle hooks that have yet to run in the container."""
+        (self.state / "stale_hooks").write_text("\n".join(hooks))
+
+    def set_stop_seconds(self, seconds):
+        """How long `docker compose stop` takes."""
+        (self.state / "stop_seconds").write_text(str(seconds))
+
+    def set_failing_command(self, command):
+        """Make the lifecycle command with this text exit with an error."""
+        (self.state / "failing_command").write_text(command)
+
+    @property
+    def recorded_hooks(self):
+        """The marker files written by hooks that ran to the end."""
+        recorded = self.state / "recorded_hooks"
+        return recorded.read_text().split() if recorded.exists() else []
 
     def set_up_exit_code(self, code):
         (self.state / "up_exit_code").write_text(str(code))
@@ -168,6 +216,20 @@ class FakeDocker:
     def calls_to(self, *words):
         """The calls whose arguments include all of `words`."""
         return [call for call in self.calls if all(word in call for word in words)]
+
+    @property
+    def shell_calls(self):
+        """The calls that opened a shell in the container."""
+        return [call for call in self.calls_to("exec") if call[-1] == "pyde"]
+
+    @property
+    def hook_commands(self):
+        """The lifecycle commands run in the container, as lists of words."""
+        commands = []
+        for call in self.calls_to("exec"):
+            if "markers" not in call and call[-1] != "pyde":
+                commands.append(call[call.index("pyde") + 4 :])
+        return commands
 
     @property
     def stopped(self):

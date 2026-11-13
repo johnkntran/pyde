@@ -65,6 +65,7 @@ def test_the_basics_are_read_with_their_defaults(tmp_path):
     assert config.mounts == ()
     assert config.override_command is False
     assert config.stop_on_close is True
+    assert config.hooks == {}
     assert config.ignored == ()
 
 
@@ -154,14 +155,52 @@ def test_properties_pyde_does_not_act_on_are_listed(tmp_path):
         customizations={"vscode": {"extensions": ["ms-python.python"]}},
     )
 
-    # Customizations are for other tools, so there is nothing to say about them.
-    assert config.ignored == ("Features", "forwardPorts", "postCreateCommand")
+    # Customizations are for other tools, so there is nothing to say about
+    # them, and lifecycle commands are run.
+    assert config.ignored == ("Features", "forwardPorts")
 
 
 def test_empty_values_of_those_properties_are_not_worth_mentioning(tmp_path):
-    config = load(tmp_path, features={}, forwardPorts=[], postCreateCommand="")
+    config = load(tmp_path, features={}, forwardPorts=[])
 
     assert config.ignored == ()
+
+
+# Lifecycle commands
+
+
+def test_a_hook_may_be_a_string_a_list_or_an_object_of_either(tmp_path):
+    config = load(
+        tmp_path,
+        initializeCommand="make setup",
+        onCreateCommand=["pip", "install", "-e", "."],
+        postCreateCommand={"deps": "npm ci", "db": ["./manage.py", "migrate"]},
+        postStartCommand="",
+    )
+
+    assert config.hooks == {
+        "initializeCommand": ("make setup",),
+        "onCreateCommand": (["pip", "install", "-e", "."],),
+        # An object's commands, in the order they were written.
+        "postCreateCommand": ("npm ci", ["./manage.py", "migrate"]),
+    }
+
+
+def test_variables_are_filled_in_inside_hooks_too(tmp_path):
+    config = load(tmp_path, postCreateCommand="echo ${localWorkspaceFolderBasename}")
+
+    assert config.hooks == {"postCreateCommand": (f"echo {tmp_path.name}",)}
+
+
+@pytest.mark.parametrize("hook", [5, ["pip", 3], {"deps": {"nested": "no"}}])
+def test_a_hook_of_the_wrong_shape_makes_the_configuration_unusable(tmp_path, hook):
+    path = write_config(
+        tmp_path,
+        {"dockerComposeFile": "c.yml", "service": "app", "postCreateCommand": hook},
+    )
+
+    with pytest.raises(ConfigError, match="malformed property"):
+        load_config(path, tmp_path)
 
 
 # Variables
