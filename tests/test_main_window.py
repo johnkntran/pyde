@@ -437,7 +437,7 @@ def test_find_follows_the_current_tab(window, file, tmp_path):
     window.find_bar.find_field.setText("ell")
 
     run(window, "edit.findNext")
-    window.tabs.setCurrentWidget(first)
+    window.tabs.setCurrentIndex(0)
     run(window, "edit.findNext")
 
     assert second.textCursor().selectedText() == "ell"
@@ -745,3 +745,169 @@ def test_a_mistake_in_the_settings_file_shows_in_the_status_bar(qapp, tmp_path):
 
     assert "unknown style 'no-such-style'" in window.statusBar().currentMessage()
     window.close()
+
+
+# Previews
+
+
+@pytest.fixture
+def readme(tmp_path):
+    path = tmp_path / "README.md"
+    path.write_text("# Title\n\nSome **bold** text.\n")
+    return path
+
+
+def choose(window, label):
+    """Pick an item in the Raw/Preview picker, as a click on it would."""
+    picker = window.view_picker
+    picker.setCurrentIndex(picker.findText(label))
+    picker.activated.emit(picker.currentIndex())
+
+
+def test_the_picker_shows_only_for_files_that_have_a_preview(
+    window, file, readme, tmp_path
+):
+    assert not window.view_picker.isVisibleTo(window)
+
+    window.open_file(file)
+    assert not window.view_picker.isVisibleTo(window)
+
+    window.open_file(readme)
+    assert window.view_picker.isVisibleTo(window)
+    assert window.view_picker.currentText() == "Raw"
+
+    for name in ("data.csv", "data.tsv"):
+        (tmp_path / name).write_text("a\n1\n")
+        window.open_file(tmp_path / name)
+        assert window.view_picker.isVisibleTo(window)
+
+    window.tabs.setCurrentIndex(0)
+    assert not window.view_picker.isVisibleTo(window)
+
+
+def test_choosing_preview_renders_the_file_and_raw_brings_the_text_back(window, readme):
+    editor = window.open_file(readme)
+
+    choose(window, "Preview")
+    view = window.current_view()
+    assert view.previewing
+    assert view.currentWidget().toPlainText() == "Title\nSome bold text."
+
+    choose(window, "Raw")
+    assert view.currentWidget() is editor
+    assert editor.toPlainText() == "# Title\n\nSome **bold** text.\n"
+
+
+def test_a_csv_file_previews_as_a_table(window, tmp_path):
+    path = tmp_path / "people.csv"
+    path.write_text("name,age\nAda,36\n")
+    window.open_file(path)
+
+    choose(window, "Preview")
+
+    model = window.current_view().currentWidget().model()
+    assert model.headerData(1, Qt.Orientation.Horizontal) == "age"
+    assert model.index(0, 0).data() == "Ada"
+
+
+def test_each_tab_remembers_its_own_choice(window, readme, tmp_path):
+    other = tmp_path / "OTHER.md"
+    other.write_text("plain\n")
+    window.open_file(readme)
+    choose(window, "Preview")
+    window.open_file(other)
+    assert window.view_picker.currentText() == "Raw"
+
+    window.tabs.setCurrentIndex(0)
+
+    assert window.view_picker.currentText() == "Preview"
+    assert window.current_view().previewing
+
+
+def test_the_toggle_preview_key_switches_back_and_forth(window, readme, wait_until):
+    window.open_file(readme)
+    show(window, wait_until)
+
+    press(window, "cmd+shift+v")
+    assert window.current_view().previewing
+    assert window.view_picker.currentText() == "Preview"
+
+    press(window, "cmd+shift+v")
+    assert not window.current_view().previewing
+    assert window.view_picker.currentText() == "Raw"
+
+
+def test_toggling_preview_on_a_file_without_one_explains_itself(window, file):
+    window.open_file(file)
+
+    run(window, "view.togglePreview")
+
+    assert not window.current_view().previewing
+    assert window.statusBar().currentMessage() == (
+        "Only Markdown, CSV, and TSV files have a preview"
+    )
+
+
+def test_find_leaves_the_preview_so_that_the_text_can_be_searched(window, readme):
+    editor = window.open_file(readme)
+    choose(window, "Preview")
+
+    run(window, "edit.find")
+
+    assert not window.current_view().previewing
+    assert window.view_picker.currentText() == "Raw"
+    assert not window.find_bar.isHidden()
+    window.find_bar.find_field.setText("bold")
+    run(window, "edit.findNext")
+    assert editor.textCursor().selectedText() == "bold"
+
+
+def test_saving_under_a_name_with_a_preview_brings_the_picker(
+    window, tmp_path, monkeypatch
+):
+    target = tmp_path / "notes.md"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
+    window.new_file()
+    window.current_editor().insertPlainText("# Notes\n")
+    assert not window.view_picker.isVisibleTo(window)
+
+    window.save()
+
+    assert window.view_picker.isVisibleTo(window)
+
+
+def test_saving_a_previewed_file_as_a_kind_without_one_returns_to_the_text(
+    window, readme, tmp_path, monkeypatch
+):
+    target = tmp_path / "readme.txt"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
+    window.open_file(readme)
+    choose(window, "Preview")
+
+    run(window, "file.saveAs")
+
+    assert not window.current_view().previewing
+    assert not window.view_picker.isVisibleTo(window)
+
+
+def test_a_previewed_file_with_unsaved_changes_still_asks_before_closing(
+    window, readme, monkeypatch
+):
+    answer_unsaved_changes(monkeypatch, BUTTON.Cancel)
+    window.open_file(readme).appendPlainText("more")
+    choose(window, "Preview")
+
+    assert not window.close_tab()
+
+    assert tab_titles(window) == ["README.md •"]
+
+
+def test_the_previewed_file_can_be_saved_and_closed(window, readme):
+    window.open_file(readme).appendPlainText("more")
+    choose(window, "Preview")
+
+    assert window.save()
+    assert window.close_tab()
+
+    assert readme.read_text().endswith("more")
+    assert window.tabs.count() == 0
