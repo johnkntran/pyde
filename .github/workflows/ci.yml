@@ -1,0 +1,57 @@
+name: CI
+
+# Pull requests get linted, tested, and packaged. Pushing a version tag such as
+# v0.1.0 does the same and then publishes the disk image as a GitHub Release.
+on:
+  pull_request:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uv sync --locked
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pytest
+
+  package:
+    # macos-latest is Apple Silicon, which is the only architecture Pyde ships for.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: Check that the tag matches the project version
+        if: github.ref_type == 'tag'
+        run: test "v$(uv version --short)" = "$GITHUB_REF_NAME"
+      - run: uv sync --locked
+      - run: scripts/build_dmg.sh
+      - name: Smoke-test the packaged app
+        run: dist/Pyde.app/Contents/MacOS/Pyde --smoke-test
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [test, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dmg
+      - name: Publish the GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" *.dmg --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
