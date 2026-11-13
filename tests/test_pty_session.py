@@ -10,7 +10,8 @@ pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="drives a Unix shell on a Unix pseudo-terminal"
 )
 
-ENV = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin", "TERM": "xterm-256color"}
+HOME = os.environ.get("HOME", "")
+ENV = {"HOME": HOME, "PATH": "/usr/bin:/bin", "TERM": "xterm-256color"}
 SHELL = ["/bin/sh", "-l"]
 
 
