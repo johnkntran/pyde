@@ -17,6 +17,7 @@ from pyde.highlighter import DARK_STYLE, LIGHT_STYLE, lexer_for
 from pyde.main_window import MainWindow
 
 SMOKE_TEST_TIMEOUT_MS = 30_000
+SMOKE_TEST_POLL_MS = 100
 # One file name for each of the Pygments lexer modules worth checking.
 SMOKE_TEST_FILE_NAMES = ("a.py", "a.json", "a.toml", "a.html", "a.md", "Dockerfile")
 
@@ -54,19 +55,22 @@ def _run_smoke_test(app: QApplication, window: MainWindow) -> None:
     Those are the parts loaded by name at run time, which PyInstaller cannot
     see when it decides what to bundle: Pygments' lexers and styles, and the
     terminal, which needs the web engine's helper process, the xterm.js files,
-    and a shell on a pseudo-terminal.
+    and a shell on a pseudo-terminal that Pyde can read from.
     """
     problems = _highlighting_problems()
 
-    def finish(terminal_started: bool) -> None:
-        if not terminal_started:
-            problems.append("the terminal did not start")
+    def finish(terminal_works: bool) -> None:
+        if not terminal_works:
+            problems.append("the terminal did not start a shell and show its output")
         for problem in problems:
             print(f"smoke test failed: {problem}", file=sys.stderr)
         window.terminal_view.shutdown()
         app.exit(1 if problems else 0)
 
-    window.terminal_view.started.connect(lambda: finish(True))
+    # A shell writes its prompt as soon as it starts.
+    watch = QTimer(window, interval=SMOKE_TEST_POLL_MS)
+    watch.timeout.connect(lambda: window.terminal_view.has_output and finish(True))
+    watch.start()
     QTimer.singleShot(SMOKE_TEST_TIMEOUT_MS, lambda: finish(False))
 
 

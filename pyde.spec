@@ -1,16 +1,24 @@
-# PyInstaller build recipe for the macOS app bundle. Run via scripts/build_dmg.sh.
+# PyInstaller build recipe. Run via scripts/build_dmg.sh on macOS, which makes
+# dist/Pyde.app, or scripts/build_windows.ps1 on Windows, which makes dist/Pyde.
 
+import sys
 from importlib.metadata import version
 
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 APP_NAME = "Pyde"
 
+# The package's non-Python files, plus its metadata so the app can read its
+# own version at runtime.
+datas = collect_data_files("pyde") + copy_metadata("pyde")
+if sys.platform == "win32":
+    # The helper programs pywinpty starts for the terminal. PyInstaller finds
+    # its libraries but not these.
+    datas += collect_data_files("winpty", includes=["*.exe"])
+
 a = Analysis(
     ["src/pyde/__main__.py"],
-    # The package's non-Python files, plus its metadata so the app can read its
-    # own version at runtime.
-    datas=collect_data_files("pyde") + copy_metadata("pyde"),
+    datas=datas,
     # QtWebEngine links against Qt Quick, which makes PyInstaller pull in every
     # QML plugin and the ~110 frameworks behind them. Pyde uses no QML, and
     # leaving these bindings out drops about 100 MB from the app.
@@ -23,14 +31,16 @@ exe = EXE(
     exclude_binaries=True,
     name=APP_NAME,
     console=False,
-    # PySide6 ships universal binaries; this strips the unused Intel half.
-    target_arch="arm64",
+    # On macOS PySide6 ships universal binaries; this strips the unused Intel
+    # half. Elsewhere the build is for whatever it runs on.
+    target_arch="arm64" if sys.platform == "darwin" else None,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name=APP_NAME)
-app = BUNDLE(
-    coll,
-    name=f"{APP_NAME}.app",
-    bundle_identifier="io.github.johnkntran.pyde",
-    version=version("pyde"),
-    info_plist={"LSMinimumSystemVersion": "14.0"},
-)
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name=f"{APP_NAME}.app",
+        bundle_identifier="io.github.johnkntran.pyde",
+        version=version("pyde"),
+        info_plist={"LSMinimumSystemVersion": "14.0"},
+    )
