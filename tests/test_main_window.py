@@ -504,3 +504,120 @@ def test_closing_the_window_ends_the_terminals_shell(window, wait_until):
     window.close()
 
     assert not window.terminal_view.running
+
+
+# Dev containers
+
+
+def connect(window, wait_until):
+    """Click "Reopen in Container" and wait for the terminal to be inside."""
+    window.notice_bar.action_button.click()
+    wait_until(lambda: window.container_label.isVisibleTo(window), timeout=30)
+
+
+def test_a_folder_with_a_dev_container_offers_to_reopen_in_it(window, project):
+    window.open_folder(project)
+
+    assert not window.notice_bar.isHidden()
+    assert window.notice_bar.label.text() == (
+        "This folder has a dev container configuration."
+    )
+    assert window.notice_bar.action_button.text() == "Reopen in Container"
+
+
+def test_a_folder_without_one_offers_nothing(window, tmp_path):
+    window.open_folder(tmp_path)
+
+    assert window.notice_bar.isHidden()
+    run(window, "devcontainer.reopenInContainer")
+    assert "no dev container configuration" in window.statusBar().currentMessage()
+
+
+def test_a_configuration_pyde_cannot_use_says_why_and_offers_no_button(window, project):
+    config = project / ".devcontainer" / "devcontainer.json"
+    config.write_text('{"image": "python:3"}')
+
+    window.open_folder(project)
+
+    assert "can't be used" in window.notice_bar.label.text()
+    assert "this one uses 'image'" in window.notice_bar.label.text()
+    assert window.notice_bar.action_button.isHidden()
+
+
+def test_reopening_in_the_container_moves_the_terminal_into_it(
+    window, project, fake_docker, wait_until
+):
+    show(window, wait_until)
+    window.open_folder(project)
+
+    connect(window, wait_until)
+
+    assert window.windowTitle() == "project [Dev Container: Sample] — Pyde"
+    assert window.container_label.text() == "Dev Container: Sample"
+    assert window.notice_bar.isHidden()
+    wait_until(lambda: fake_docker.calls_to("exec"))
+    [shell] = fake_docker.calls_to("exec")
+    assert shell[shell.index("--workdir") + 1] == "/workspace"
+
+
+def test_a_failed_start_is_reported_with_a_way_to_retry(
+    window, project, fake_docker, wait_until
+):
+    fake_docker.set_up_exit_code(1)
+    show(window, wait_until)
+    window.open_folder(project)
+
+    window.notice_bar.action_button.click()
+    wait_until(lambda: "did not start" in window.notice_bar.label.text(), timeout=30)
+
+    assert window.notice_bar.action_button.text() == "Retry"
+    assert window.container_label.isHidden()
+    assert window.windowTitle() == "project — Pyde"
+
+    fake_docker.set_up_exit_code(0)
+    connect(window, wait_until)
+    assert len(fake_docker.calls_to("up")) == 2
+
+
+def test_reopening_locally_leaves_the_container_and_offers_it_again(
+    window, project, fake_docker, wait_until
+):
+    show(window, wait_until)
+    window.open_folder(project)
+    connect(window, wait_until)
+
+    run(window, "devcontainer.reopenLocally")
+
+    assert window.windowTitle() == "project — Pyde"
+    assert window.container_label.isHidden()
+    assert window.notice_bar.action_button.text() == "Reopen in Container"
+    wait_until(lambda: fake_docker.stopped)
+
+
+def test_opening_another_folder_leaves_the_container(
+    window, project, fake_docker, tmp_path, wait_until
+):
+    other = tmp_path / "other"
+    other.mkdir()
+    show(window, wait_until)
+    window.open_folder(project)
+    connect(window, wait_until)
+
+    window.open_folder(other)
+
+    assert window.windowTitle() == "other — Pyde"
+    assert window.container_label.isHidden()
+    assert window.notice_bar.isHidden()
+    wait_until(lambda: fake_docker.stopped)
+
+
+def test_closing_the_window_stops_the_containers(
+    window, project, fake_docker, wait_until
+):
+    show(window, wait_until)
+    window.open_folder(project)
+    connect(window, wait_until)
+
+    window.close()
+
+    wait_until(lambda: fake_docker.stopped)
