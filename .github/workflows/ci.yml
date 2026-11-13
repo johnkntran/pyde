@@ -15,7 +15,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv publishes no floating major tag, so it is pinned to a release.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uv sync --locked
       - run: uv run ruff check
       - run: uv run ruff format --check
@@ -26,7 +27,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv publishes no floating major tag, so it is pinned to a release.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Check that the tag matches the project version
         if: github.ref_type == 'tag'
         run: test "v$(uv version --short)" = "$GITHUB_REF_NAME"
