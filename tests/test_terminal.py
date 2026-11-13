@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -307,10 +308,27 @@ def test_switching_shell_abandons_a_running_task_without_reporting_it(
     assert statuses == []
 
 
-def test_a_message_from_pyde_appears_on_a_line_of_its_own(harness):
+def test_a_message_from_pyde_appears_in_bold_on_a_line_of_its_own(harness):
     harness.view.show_message("A word from Pyde.")
+    harness.type("echo plain-$((1 + 1))\r")
 
     harness.wait_for("\nA word from Pyde.\n")
+    harness.wait_for("plain-2")
+    bold_lines = harness.evaluate(
+        """
+        (() => {
+          const buffer = terminal.buffer.active;
+          const bold = [];
+          for (let row = 0; row < buffer.length; row++) {
+            const line = buffer.getLine(row);
+            const cell = line && line.getCell(0);
+            if (cell && cell.isBold()) bold.push(line.translateToString(true));
+          }
+          return JSON.stringify(bold);
+        })()
+        """
+    )
+    assert json.loads(bold_lines) == ["A word from Pyde."]
 
 
 def test_the_environment_can_start_from_another_one():

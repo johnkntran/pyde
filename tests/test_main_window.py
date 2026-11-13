@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
@@ -555,8 +557,8 @@ def test_reopening_in_the_container_moves_the_terminal_into_it(
     assert window.windowTitle() == "project [Dev Container: Sample] — Pyde"
     assert window.container_label.text() == "Dev Container: Sample"
     assert window.notice_bar.isHidden()
-    wait_until(lambda: fake_docker.calls_to("exec"))
-    [shell] = fake_docker.calls_to("exec")
+    wait_until(lambda: fake_docker.shell_calls)
+    [shell] = fake_docker.shell_calls
     assert shell[shell.index("--workdir") + 1] == "/workspace"
 
 
@@ -621,3 +623,89 @@ def test_closing_the_window_stops_the_containers(
     window.close()
 
     wait_until(lambda: fake_docker.stopped)
+
+
+def add_to_config(project, **properties):
+    path = project / ".devcontainer" / "devcontainer.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), **properties}))
+
+
+def test_rebuild_container_replaces_the_containers(
+    window, project, fake_docker, wait_until
+):
+    show(window, wait_until)
+    window.open_folder(project)
+    connect(window, wait_until)
+
+    run(window, "devcontainer.rebuild")
+    wait_until(lambda: len(fake_docker.calls_to("up")) == 2, timeout=30)
+
+    first, second = fake_docker.calls_to("up")
+    assert "--force-recreate" not in first
+    assert "--build" in second and "--force-recreate" in second
+
+
+def test_a_failed_lifecycle_command_is_reported_once_connected(
+    window, project, fake_docker, wait_until
+):
+    add_to_config(project, postCreateCommand="install-things")
+    fake_docker.set_failing_command("install-things")
+    show(window, wait_until)
+    window.open_folder(project)
+
+    connect(window, wait_until)
+
+    assert window.container_label.text() == "Dev Container: Sample"
+    assert not window.notice_bar.isHidden()
+    assert "postCreateCommand failed" in window.notice_bar.label.text()
+
+
+def test_the_configuration_is_read_again_when_reopening(
+    window, project, fake_docker, wait_until
+):
+    show(window, wait_until)
+    window.open_folder(project)
+    # Edited after the folder was opened.
+    add_to_config(project, name="Renamed")
+
+    connect(window, wait_until)
+
+    assert window.container_label.text() == "Dev Container: Renamed"
+
+
+def test_reconnecting_does_not_stop_the_containers_first(
+    window, project, fake_docker, wait_until
+):
+    show(window, wait_until)
+    window.open_folder(project)
+    connect(window, wait_until)
+    wait_until(lambda: len(fake_docker.shell_calls) == 1)
+
+    run(window, "devcontainer.reopenInContainer")
+    wait_until(lambda: len(fake_docker.shell_calls) == 2, timeout=30)
+
+    assert not fake_docker.stopped
+
+
+def test_a_bring_up_waits_for_the_containers_to_finish_stopping(
+    window, project, fake_docker, wait_until
+):
+    fake_docker.set_stop_seconds(1.5)
+    show(window, wait_until)
+    window.open_folder(project)
+    connect(window, wait_until)
+    wait_until(lambda: len(fake_docker.shell_calls) == 1)
+
+    # Leave, and come straight back while the containers are still stopping.
+    run(window, "devcontainer.reopenLocally")
+    run(window, "devcontainer.reopenInContainer")
+    wait_until(lambda: len(fake_docker.shell_calls) == 2, timeout=30)
+
+    # The second `up` waited for the stop, which would otherwise have taken
+    # down the containers it started.
+    steps = [
+        "up" if "up" in call else "stop-finished"
+        for call in fake_docker.calls
+        if "up" in call or call == ["stop-finished"]
+    ]
+    assert steps == ["up", "stop-finished", "up"]

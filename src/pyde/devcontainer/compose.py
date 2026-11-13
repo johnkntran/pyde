@@ -9,7 +9,11 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from pyde.devcontainer.config import DevContainerConfig, substitute_container_env
+from pyde.devcontainer.config import (
+    Command,
+    DevContainerConfig,
+    substitute_container_env,
+)
 
 # Labels that Compose puts on every container it creates.
 _PROJECT_LABEL = "com.docker.compose.project"
@@ -27,6 +31,41 @@ _OWN_SHELL = (
     'case "$shell" in ""|*/nologin|*/false) shell=/bin/sh;; esac; '
     'exec "$shell" -l'
 )
+# Run by /bin/sh inside the container to run one lifecycle command. Its
+# arguments are a marker file's name, what to write in it, the kind of command
+# ("shell" for a string, "exec" for a program and its arguments), and then the
+# command itself.
+#
+# The command gets the environment of the user's shell started as a login and
+# interactive one, so that it finds what a terminal in the container would.
+# A string is still run by /bin/sh, as the specification says. If the command
+# succeeds, the marker is written, which is how it is known to have run.
+_RUN_HOOK = """\
+marker=$1 stamp=$2 kind=$3
+shift 3
+shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
+case "$shell" in */bash|*/zsh|*/sh|*/dash|*/ash|*/ksh) ;; *) shell=/bin/sh;; esac
+if [ "$kind" = shell ]; then
+  "$shell" -l -i -c 'exec /bin/sh -c "$0"' "$1"
+else
+  "$shell" -l -i -c 'exec "$@"' "$shell" "$@"
+fi
+status=$?
+if [ "$status" -eq 0 ] && [ -n "$marker" ]; then
+  mkdir -p "$HOME/.devcontainer"
+  printf '%s\\n' "$stamp" > "$HOME/.devcontainer/$marker"
+fi
+exit "$status"
+"""
+# Run by /bin/sh inside the container. Each argument is hook=stamp; it prints
+# the hooks whose marker file does not hold that stamp.
+_STALE_MARKERS = """\
+for entry in "$@"; do
+  hook=${entry%%=*} stamp=${entry#*=}
+  recorded=$(cat "$HOME/.devcontainer/.${hook}Marker" 2>/dev/null)
+  [ "$recorded" = "$stamp" ] || echo "$hook"
+done
+"""
 _VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -110,6 +149,7 @@ def up_command(
     config: DevContainerConfig,
     override_file: str,
     container_exists: bool,
+    rebuild: bool = False,
 ) -> list[str]:
     command = [
         docker,
@@ -120,7 +160,10 @@ def up_command(
         "up",
         "--detach",
     ]
-    if container_exists:
+    if rebuild:
+        # Build the images again and replace the containers with new ones.
+        command += ["--build", "--force-recreate"]
+    elif container_exists:
         # Leave a container that is already there as it is, rather than
         # replace it because Pyde's settings differ from whoever made it.
         command.append("--no-recreate")
@@ -153,13 +196,71 @@ def shell_command(
 ) -> list[str]:
     """Open the user's shell inside the container, given what `docker inspect`
     reported about it."""
+    return _exec(docker, container, config, inspected, _OWN_SHELL)
+
+
+def hook_command(
+    docker: str,
+    container: str,
+    config: DevContainerConfig,
+    inspected: Mapping[str, Any],
+    command: Command,
+    hook: str | None = None,
+) -> list[str]:
+    """Run one lifecycle command inside the container.
+
+    If `hook` is given, a successful run is recorded, so that the hook is not
+    listed by `stale_hooks_command` again.
+    """
+    marker, stamp = "", ""
+    if hook is not None:
+        marker, stamp = f".{hook}Marker", _stamps(inspected)[hook]
+    if isinstance(command, str):
+        arguments = [marker, stamp, "shell", command]
+    else:
+        arguments = [marker, stamp, "exec", *command]
+    return _exec(docker, container, config, inspected, _RUN_HOOK, arguments)
+
+
+def stale_hooks_command(
+    docker: str,
+    container: str,
+    config: DevContainerConfig,
+    inspected: Mapping[str, Any],
+) -> list[str]:
+    """Ask which once-only hooks have yet to run. It prints their names."""
+    command = [docker, "exec"]
+    user = remote_user(config, inspected)
+    if user:
+        command += ["--user", user]
+    entries = [f"{hook}={stamp}" for hook, stamp in _stamps(inspected).items()]
+    return [*command, container, "/bin/sh", "-c", _STALE_MARKERS, "markers", *entries]
+
+
+def host_command(command: Command) -> list[str]:
+    """Run a lifecycle command on this Mac."""
+    return ["/bin/sh", "-c", command] if isinstance(command, str) else list(command)
+
+
+def _exec(
+    docker: str,
+    container: str,
+    config: DevContainerConfig,
+    inspected: Mapping[str, Any],
+    script: str,
+    arguments: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """Run a /bin/sh script inside the container, attached to the terminal.
+
+    It runs the way everything of the user's does there: as the remote user,
+    in the workspace folder, and with the terminal's environment.
+    """
     command = [docker, "exec", "--interactive", "--tty"]
     user = remote_user(config, inspected)
     if user:
         command += ["--user", user]
     command += ["--workdir", config.workspace_folder]
 
-    script = _OWN_SHELL
     variables = {"TERM": "xterm-256color", "COLORTERM": "truecolor"}
     variables.update(remote_env(config, inspected))
     for name, value in variables.items():
@@ -170,7 +271,23 @@ def shell_command(
             script = f"unset {name}; {script}"
         else:
             command += ["--env", f"{name}={value}"]
-    return [*command, container, "/bin/sh", "-c", script]
+    # The word after the script is its $0; the arguments follow it.
+    return [*command, container, "/bin/sh", "-c", script, "pyde", *arguments]
+
+
+def _stamps(inspected: Mapping[str, Any]) -> dict[str, str]:
+    """For each once-only hook, what tells this run of it from the last.
+
+    Three hooks run once in the life of a container, so they are stamped with
+    when it was created. One runs each time it starts.
+    """
+    created, started = inspected["Created"], inspected["State"]["StartedAt"]
+    return {
+        "onCreateCommand": created,
+        "updateContentCommand": created,
+        "postCreateCommand": created,
+        "postStartCommand": started,
+    }
 
 
 def remote_user(config: DevContainerConfig, inspected: Mapping[str, Any]) -> str | None:

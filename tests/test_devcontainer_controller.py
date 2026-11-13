@@ -39,19 +39,21 @@ class Harness:
         self.container = DevContainer(config, self.terminal, data_folder)
         self.connections = 0
         self.failures = []
+        self.warnings = []
         self.container.connected.connect(self._count_connection)
         self.container.failed.connect(self.failures.append)
+        self.container.warned.connect(self.warnings.append)
 
     def _count_connection(self):
         self.connections += 1
 
-    def start(self):
+    def start(self, rebuild=False):
         """Bring the container up and wait for it to succeed or fail."""
-        self.container.start()
+        self.container.start(rebuild)
         self.wait_until(lambda: self.connections or self.failures, timeout=30)
         if self.connections:
             # The shell is started a moment after the connection is announced.
-            self.wait_until(lambda: self.docker.calls_to("exec"))
+            self.wait_until(lambda: self.docker.shell_calls)
 
     def screen(self):
         results = []
@@ -99,7 +101,8 @@ def test_the_steps_run_in_order_with_the_right_project(harness, fake_docker, pro
         next(word for word in call if word in ("config", "ps", "up", "inspect", "exec"))
         for call in fake_docker.calls
     ]
-    assert steps == ["config", "ps", "up", "ps", "inspect", "exec"]
+    # The first exec asks which lifecycle hooks are due; the second is the shell.
+    assert steps == ["config", "ps", "up", "ps", "inspect", "exec", "exec"]
 
     [up] = fake_docker.calls_to("up")
     # Named the way VS Code names it, not "devcontainer" as Compose would.
@@ -150,7 +153,7 @@ def test_the_shell_runs_as_the_configured_user_with_the_terminal_environment(
 
     harness.start()
 
-    [shell] = fake_docker.calls_to("exec")
+    [shell] = fake_docker.shell_calls
     assert shell[shell.index("--user") + 1] == "ada"
     assert shell[shell.index("--workdir") + 1] == "/workspace"
     harness.type("echo [$GREETING] [$MORE]\r")
@@ -178,7 +181,7 @@ def test_a_failing_compose_up_is_reported_and_no_shell_is_opened(harness, fake_d
     assert harness.failures == [
         "docker compose up failed. Its output is in the terminal."
     ]
-    assert fake_docker.calls_to("exec") == []
+    assert fake_docker.shell_calls == []
     assert "fake docker: could not start" in harness.screen()
 
 
@@ -309,3 +312,135 @@ def test_leaving_partway_abandons_the_rest(harness, fake_docker, wait_until):
     # The first command was cut short, and none of the later ones ran.
     assert fake_docker.calls_to("up") == []
     assert fake_docker.calls_to("exec") == []
+
+
+# Lifecycle commands
+
+
+ALL_HOOKS = {
+    "initializeCommand": "echo initialized > initialized.txt",
+    "onCreateCommand": "on-create",
+    "updateContentCommand": "update-content",
+    "postCreateCommand": "post-create",
+    "postStartCommand": "post-start",
+    "postAttachCommand": "post-attach",
+}
+
+
+def reconfigure(harness, project, **properties):
+    configure(project, **properties)
+    harness.container.config = load_config(find_config(project), project)
+
+
+def test_the_lifecycle_commands_run_in_order_before_the_shell_opens(
+    harness, fake_docker, project
+):
+    reconfigure(harness, project, **ALL_HOOKS)
+
+    harness.start()
+
+    # The first one runs on this Mac, in the project folder, before `up`.
+    assert (project / "initialized.txt").read_text() == "initialized\n"
+    # The rest run inside the container.
+    assert fake_docker.hook_commands == [
+        ["on-create"],
+        ["update-content"],
+        ["post-create"],
+        ["post-start"],
+        ["post-attach"],
+    ]
+    assert harness.warnings == []
+    screen = harness.screen()
+    assert "\nRunning onCreateCommand\n" in screen
+    assert screen.index("postCreateCommand") < screen.index(
+        "fake docker: ran post-start"
+    )
+
+
+def test_the_once_only_commands_are_recorded_as_done_but_post_attach_is_not(
+    harness, fake_docker, project
+):
+    reconfigure(harness, project, **ALL_HOOKS)
+
+    harness.start()
+
+    assert fake_docker.recorded_hooks == [
+        ".onCreateCommandMarker",
+        ".updateContentCommandMarker",
+        ".postCreateCommandMarker",
+        ".postStartCommandMarker",
+    ]
+
+
+def test_commands_already_run_in_this_container_are_not_run_again(
+    harness, fake_docker, project
+):
+    reconfigure(harness, project, **ALL_HOOKS)
+    # As on a later start of the same container.
+    fake_docker.set_stale_hooks("postStartCommand")
+
+    harness.start()
+
+    assert fake_docker.hook_commands == [["post-start"], ["post-attach"]]
+
+
+def test_an_object_of_commands_runs_each_and_is_recorded_after_the_last(
+    harness, fake_docker, project
+):
+    reconfigure(
+        harness, project, postCreateCommand={"first": "one", "second": ["two", "words"]}
+    )
+
+    harness.start()
+
+    assert fake_docker.hook_commands == [["one"], ["two", "words"]]
+    kinds = [
+        call[call.index("pyde") + 3]
+        for call in fake_docker.calls_to("exec")
+        if "markers" not in call and call[-1] != "pyde"
+    ]
+    assert kinds == ["shell", "exec"]
+    assert fake_docker.recorded_hooks == [".postCreateCommandMarker"]
+
+
+def test_a_failing_command_skips_the_rest_but_still_opens_the_shell(
+    harness, fake_docker, project
+):
+    reconfigure(harness, project, **ALL_HOOKS)
+    fake_docker.set_failing_command("update-content")
+
+    harness.start()
+
+    assert fake_docker.hook_commands == [["on-create"], ["update-content"]]
+    assert harness.connections == 1
+    assert harness.failures == []
+    assert harness.warnings == [
+        "updateContentCommand failed with exit status 9, so the lifecycle"
+        " commands after it were skipped."
+    ]
+    # Not recorded, so it is tried again next time.
+    assert fake_docker.recorded_hooks == [".onCreateCommandMarker"]
+
+
+def test_a_failing_initialize_command_stops_before_any_container_starts(
+    harness, fake_docker, project
+):
+    reconfigure(harness, project, initializeCommand="exit 4")
+
+    harness.start()
+
+    assert harness.failures == [
+        "initializeCommand failed with exit status 4. See the terminal."
+    ]
+    assert harness.connections == 0
+    assert fake_docker.calls_to("up") == []
+
+
+def test_a_rebuild_builds_again_and_replaces_the_containers(harness, fake_docker):
+    fake_docker.container_exists()
+
+    harness.start(rebuild=True)
+
+    [up] = fake_docker.calls_to("up")
+    assert "--build" in up and "--force-recreate" in up
+    assert "--no-recreate" not in up

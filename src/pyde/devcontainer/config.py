@@ -23,16 +23,21 @@ CONFIG_PATHS = (".devcontainer/devcontainer.json", ".devcontainer.json")
 # Properties that select a kind of dev container Pyde cannot run.
 _NOT_COMPOSE = ("image", "build", "dockerFile")
 # Properties Pyde reads past, and the name each goes by in the notice.
-_IGNORED = {
-    "features": "Features",
-    "forwardPorts": "forwardPorts",
-    "initializeCommand": "initializeCommand",
-    "onCreateCommand": "onCreateCommand",
-    "updateContentCommand": "updateContentCommand",
-    "postCreateCommand": "postCreateCommand",
-    "postStartCommand": "postStartCommand",
-    "postAttachCommand": "postAttachCommand",
-}
+_IGNORED = {"features": "Features", "forwardPorts": "forwardPorts"}
+# The lifecycle commands, in the order they run. The first runs on this Mac
+# before the containers start; the rest run inside the container.
+HOOKS = (
+    "initializeCommand",
+    "onCreateCommand",
+    "updateContentCommand",
+    "postCreateCommand",
+    "postStartCommand",
+    "postAttachCommand",
+)
+
+# One command of a lifecycle hook: a string for a shell to run, or a list
+# giving a program and its arguments to run directly.
+Command = str | list[str]
 
 # ${name} or ${name:argument}, as in ${localEnv:HOME}.
 _VARIABLE = re.compile(r"\$\{(\w+)(?::([^}]*))?\}")
@@ -71,6 +76,8 @@ class DevContainerConfig:
     override_command: bool
     # Whether closing the folder stops the containers.
     stop_on_close: bool
+    # The lifecycle commands the file sets, by name. A hook may hold several.
+    hooks: dict[str, tuple[Command, ...]]
     # Identifies this dev container; the same value VS Code computes.
     id: str
     # Properties present in the file that Pyde does not act on.
@@ -134,6 +141,7 @@ def load_config(path: Path, folder: Path) -> DevContainerConfig:
             mounts=tuple(_mount(mount) for mount in raw.get("mounts", ())),
             override_command=raw.get("overrideCommand", False),
             stop_on_close=raw.get("shutdownAction", "stopCompose") == "stopCompose",
+            hooks={name: _commands(raw[name]) for name in HOOKS if raw.get(name)},
             id=container_id,
             ignored=tuple(
                 label
@@ -187,6 +195,23 @@ def _variable(match: re.Match[str], variables: Mapping[str, str]) -> str:
     if argument is None and name in variables:
         return variables[name]
     return match.group()
+
+
+def _commands(hook: Any) -> tuple[Command, ...]:
+    """The commands of one lifecycle hook.
+
+    A hook is a single command, or an object of named commands. The
+    specification runs an object's commands side by side; Pyde runs them one
+    after another, in the order written, so that their output stays readable.
+    """
+    commands = list(hook.values()) if isinstance(hook, dict) else [hook]
+    for command in commands:
+        is_argv = isinstance(command, list) and all(
+            isinstance(word, str) for word in command
+        )
+        if not (isinstance(command, str) or is_argv):
+            raise TypeError("a lifecycle command must be a string or a list of strings")
+    return tuple(commands)
 
 
 def _mount(mount: Any) -> dict[str, Any]:
