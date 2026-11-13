@@ -19,11 +19,19 @@ from PySide6.QtWidgets import (
 
 from pyde import __version__
 from pyde.commands import CommandRegistry
+from pyde.devcontainer.config import (
+    ConfigError,
+    DevContainerConfig,
+    find_config,
+    load_config,
+)
+from pyde.devcontainer.controller import DevContainer
 from pyde.editor import CodeEditor
 from pyde.file_list import list_files
 from pyde.file_tree import FileTree
 from pyde.find_bar import FindBar
 from pyde.keybindings import Keybindings
+from pyde.notice_bar import NoticeBar
 from pyde.palette import Palette
 from pyde.terminal import TerminalView
 
@@ -45,6 +53,13 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
         # The folder shown in the file tree; None until one is opened.
         self.folder: Path | None = None
+        # Where the user's settings, and Pyde's own working files, are kept.
+        self._config_dir = config_dir or default_config_dir()
+        # The open folder's dev container configuration, if it has a usable
+        # one, and the dev container itself once the user has asked for it.
+        self._container_config: DevContainerConfig | None = None
+        self.dev_container: DevContainer | None = None
+        self._in_container = False
 
         # The middle of the window: one tab per open file, or a placeholder
         # when there are none, with the find bar underneath.
@@ -62,10 +77,12 @@ class MainWindow(QMainWindow):
             )
         )
         self.find_bar = FindBar(self.current_editor)
+        self.notice_bar = NoticeBar()
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        layout.addWidget(self.notice_bar)
         layout.addWidget(stack)
         layout.addWidget(self.find_bar)
         self.setCentralWidget(central)
@@ -99,14 +116,14 @@ class MainWindow(QMainWindow):
         self.commands = CommandRegistry(self)
         self._add_commands()
 
-        config_dir = config_dir or default_config_dir()
         self.keybindings = Keybindings(
-            self.commands, config_dir / "keybindings.json", parent=self
+            self.commands, self._config_dir / "keybindings.json", parent=self
         )
         self.keybindings.message.connect(self._report)
-        # Create the status bar now, so the layout does not shift when the
-        # first message appears.
-        self.statusBar()
+        # Shown at the right of the status bar while working in a container.
+        self.container_label = QLabel()
+        self.container_label.hide()
+        self.statusBar().addPermanentWidget(self.container_label)
         self.keybindings.load()
 
     def _add_dock(
@@ -126,6 +143,16 @@ class MainWindow(QMainWindow):
             ("file.open", "Open File…", self.pick_file, "cmd+o"),
             ("file.openFolder", "Open Folder…", self.pick_folder, "cmd+shift+o"),
             ("file.goToFile", "Go to File…", self.go_to_file, "cmd+p"),
+            (
+                "devcontainer.reopenInContainer",
+                "Reopen in Container",
+                self.reopen_in_container,
+            ),
+            (
+                "devcontainer.reopenLocally",
+                "Reopen Folder Locally",
+                self.reopen_locally,
+            ),
             ("file.save", "Save", self.save, "cmd+s"),
             ("file.saveAs", "Save As…", self.save_as, "cmd+shift+s"),
             ("file.closeTab", "Close Tab", self.close_tab, "cmd+w"),
@@ -186,11 +213,13 @@ class MainWindow(QMainWindow):
             self.open_file(path)
 
     def open_folder(self, folder: Path) -> None:
+        self._leave_container()
         self.folder = folder.resolve()
         self.file_tree.set_folder(self.folder)
         self.terminal_view.set_folder(self.folder)
         self.file_tree_dock.show()
-        self.setWindowTitle(f"{self.folder.name} — Pyde")
+        self._update_title()
+        self._offer_container()
 
     def open_file(self, path: Path) -> CodeEditor | None:
         """Show a file in a tab, reusing its tab if it is already open."""
@@ -285,6 +314,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if all(self._may_close(editor) for editor in self.editors()):
+            self._leave_container()
             self.terminal_view.shutdown()
             event.accept()
         else:
@@ -360,3 +390,85 @@ class MainWindow(QMainWindow):
 
     def _report(self, text: str) -> None:
         self.statusBar().showMessage(text, STATUS_MESSAGE_MS)
+
+    def _update_title(self) -> None:
+        title = "Pyde"
+        if self.folder is not None:
+            place = self.folder.name
+            if self._in_container:
+                place += f" [Dev Container: {self.dev_container.config.name}]"
+            title = f"{place} — Pyde"
+        self.setWindowTitle(title)
+
+    # Dev containers
+
+    def reopen_in_container(self) -> None:
+        """Bring the folder's dev container up and move the terminal into it.
+
+        The files are still edited where they are: a dev container mounts the
+        folder, so only what runs, which is the terminal, moves.
+        """
+        if self._container_config is None:
+            self._report("This folder has no dev container configuration Pyde can use")
+            return
+        self._leave_container()
+        self.dev_container = DevContainer(
+            self._container_config, self.terminal_view, self._config_dir, parent=self
+        )
+        self.dev_container.connected.connect(self._container_connected)
+        self.dev_container.failed.connect(self._container_failed)
+        self.notice_bar.show_notice("Starting the dev container…")
+        self.terminal_dock.show()
+        self.dev_container.start()
+
+    def reopen_locally(self) -> None:
+        """Leave the dev container and return the terminal to this Mac."""
+        if self.dev_container is None:
+            return
+        self._leave_container()
+        self.terminal_view.use_shell()
+        self._offer_container()
+
+    def _offer_container(self) -> None:
+        """Tell the user if the open folder has a dev container configuration."""
+        self._container_config = None
+        self.notice_bar.hide()
+        path = find_config(self.folder)
+        if path is None:
+            return
+        try:
+            self._container_config = load_config(path, self.folder)
+        except ConfigError as error:
+            self.notice_bar.show_notice(
+                f"This folder's dev container configuration can't be used: {error}."
+            )
+            return
+        self.notice_bar.show_notice(
+            "This folder has a dev container configuration.",
+            "Reopen in Container",
+            self.reopen_in_container,
+        )
+
+    def _leave_container(self) -> None:
+        if self.dev_container is not None:
+            self.dev_container.leave()
+            self.dev_container.deleteLater()
+            self.dev_container = None
+        self._in_container = False
+        self.container_label.hide()
+        self._update_title()
+
+    def _container_connected(self) -> None:
+        self._in_container = True
+        self.notice_bar.hide()
+        self.container_label.setText(f"Dev Container: {self.dev_container.config.name}")
+        self.container_label.show()
+        self._update_title()
+        self.terminal_view.focus_terminal()
+
+    def _container_failed(self, reason: str) -> None:
+        self.notice_bar.show_notice(
+            f"The dev container did not start. {reason}",
+            "Retry",
+            self.reopen_in_container,
+        )

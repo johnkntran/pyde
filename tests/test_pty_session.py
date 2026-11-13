@@ -6,6 +6,7 @@ from PySide6.QtTest import QTest
 from pyde.pty_session import PtySession
 
 ENV = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin", "TERM": "xterm-256color"}
+SHELL = ["/bin/sh", "-l"]
 
 
 class Harness:
@@ -14,16 +15,18 @@ class Harness:
     def __init__(self, folder):
         self.session = PtySession()
         self.text = ""
-        self.exits = 0
+        # The exit status of each program that has ended.
+        self.statuses = []
         self.session.output.connect(self._collect)
-        self.session.exited.connect(self._count_exit)
-        self.session.start("/bin/sh", folder, ENV, rows=24, columns=80)
+        self.session.exited.connect(self.statuses.append)
+        self.session.start(SHELL, folder, ENV, rows=24, columns=80)
 
     def _collect(self, text):
         self.text += text.replace("\r", "")
 
-    def _count_exit(self):
-        self.exits += 1
+    @property
+    def exits(self):
+        return len(self.statuses)
 
     def run(self, command):
         self.session.write(command + "\n")
@@ -143,6 +146,31 @@ def test_the_session_reports_the_shell_exiting_with_its_last_output(
     assert not harness.session.running
 
 
+def test_the_exit_status_is_the_programs_exit_code(harness, wait_until):
+    harness.run("exit 7")
+
+    wait_until(lambda: harness.statuses == [7])
+
+
+def test_a_program_killed_by_a_signal_reports_the_signal(harness, wait_until):
+    # An interactive shell ignores the gentler signals.
+    harness.run("kill -KILL $$")
+
+    wait_until(lambda: harness.statuses == [-9])
+
+
+def test_any_command_can_be_run_not_only_a_shell(qapp, tmp_path, wait_until):
+    session = PtySession()
+    text, statuses = [], []
+    session.output.connect(text.append)
+    session.exited.connect(statuses.append)
+
+    session.start(["/bin/echo", "one two", "three"], tmp_path, ENV, 24, 80)
+
+    wait_until(lambda: statuses == [0])
+    assert "one two three" in "".join(text)
+
+
 def test_stop_ends_the_shell_without_reporting_an_exit(harness, wait_until):
     harness.run("echo up")
     wait_until(lambda: "\nup\n" in harness.text)
@@ -190,7 +218,7 @@ def test_starting_again_replaces_the_running_shell(harness, tmp_path, wait_until
     other = tmp_path / "other"
     other.mkdir()
 
-    harness.session.start("/bin/sh", other, ENV, rows=24, columns=80)
+    harness.session.start(SHELL, other, ENV, rows=24, columns=80)
     harness.run("pwd")
 
     wait_until(lambda: f"\n{other}\n" in harness.text)

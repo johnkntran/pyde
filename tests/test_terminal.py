@@ -226,3 +226,96 @@ def test_the_default_shell_is_the_users_own(monkeypatch):
 
     monkeypatch.delenv("SHELL")
     assert os.path.isabs(default_shell())
+
+
+# A custom shell, and one-off tasks
+
+
+def test_a_task_runs_in_place_of_the_shell_and_reports_its_exit_status(
+    harness, wait_until
+):
+    statuses = []
+    env = shell_environment()
+
+    harness.view.run_task(
+        ["/bin/sh", "-c", "echo task-$((1 + 1)); exit 3"], env, statuses.append
+    )
+
+    wait_until(lambda: statuses == [3])
+    harness.wait_for("task-2")
+    # A task ending is not the shell exiting, so there is no notice about it.
+    assert "The shell has exited" not in harness.screen()
+    assert not harness.view.running
+
+
+def test_after_a_task_return_brings_the_shell_back(harness, wait_until):
+    statuses = []
+    harness.view.run_task(["/usr/bin/true"], shell_environment(), statuses.append)
+    wait_until(lambda: statuses == [0])
+
+    harness.type("\r")
+    wait_until(lambda: harness.view.running)
+    harness.type("echo shell-$((2 + 2))\r")
+
+    harness.wait_for("shell-4")
+
+
+def test_a_custom_shell_replaces_the_users_own_and_restarts_after_exit(
+    harness, wait_until
+):
+    env = {**shell_environment(), "MARKER": "custom"}
+
+    harness.view.use_shell(["/bin/sh"], env, clear=False)
+    harness.type("echo in-$MARKER-shell\r")
+    harness.wait_for("in-custom-shell")
+
+    harness.type("exit\r")
+    harness.wait_for("The shell has exited")
+    harness.type("\r")
+    wait_until(lambda: harness.view.running)
+    harness.type("echo again-$MARKER\r")
+
+    harness.wait_for("again-custom")
+
+
+def test_use_shell_keeps_or_clears_the_screen_as_asked(harness):
+    harness.type("echo before-$((1 + 1))\r")
+    harness.wait_for("before-2")
+
+    harness.view.use_shell(["/bin/sh"], shell_environment(), clear=False)
+    harness.type("echo kept-$((1 + 1))\r")
+    harness.wait_for("kept-2")
+    assert "before-2" in harness.screen()
+
+    harness.view.use_shell()
+    harness.type("echo cleared-$((1 + 1))\r")
+    harness.wait_for("cleared-2")
+    assert "before-2" not in harness.screen()
+
+
+def test_switching_shell_abandons_a_running_task_without_reporting_it(
+    harness, wait_until
+):
+    statuses = []
+    harness.view.run_task(["/bin/sleep", "30"], shell_environment(), statuses.append)
+    wait_until(lambda: harness.view.running)
+
+    harness.view.use_shell()
+    harness.type("echo back-$((3 + 3))\r")
+
+    harness.wait_for("back-6")
+    assert statuses == []
+
+
+def test_a_message_from_pyde_appears_on_a_line_of_its_own(harness):
+    harness.view.show_message("A word from Pyde.")
+
+    harness.wait_for("\nA word from Pyde.\n")
+
+
+def test_the_environment_can_start_from_another_one():
+    env = shell_environment({"ONLY": "this"})
+
+    assert env["ONLY"] == "this"
+    assert env["TERM"] == "xterm-256color"
+    assert "HOME" not in env

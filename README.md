@@ -25,6 +25,29 @@ and return to your file. It runs your login shell, so the tools on your usual
 path are available, and it starts in the folder you have open. Opening another
 folder restarts the shell there.
 
+## Dev containers
+
+When the folder you open has a `.devcontainer/devcontainer.json` (or a
+`.devcontainer.json`) based on Docker Compose, Pyde offers to **Reopen in
+Container**. That starts the Compose project and turns the terminal into a
+shell inside the service's container, in `workspaceFolder`, as `remoteUser`.
+Your files are still edited where they are; the container sees them through
+the mount in your Compose file. **Reopen Folder Locally**, in the File menu,
+goes back.
+
+- **Read from `devcontainer.json`:** `dockerComposeFile`, `service`,
+  `runServices`, `workspaceFolder`, `remoteUser`, `containerEnv`, `remoteEnv`,
+  `mounts`, `overrideCommand`, and `shutdownAction`, with variables such as
+  `${localWorkspaceFolder}`, `${localEnv:NAME}`, and `${containerEnv:NAME}`.
+- **Not supported:** configurations based on an `image` or a Dockerfile,
+  Features, and `forwardPorts`; publish ports in your Compose file instead.
+  The lifecycle commands, such as `postCreateCommand`, are not run yet.
+  `customizations` are for other editors and are ignored.
+- **Shared with VS Code:** Pyde gives the Compose project the same name and
+  labels VS Code does, so the two use the same containers.
+- **On close:** the containers are stopped, unless `shutdownAction` is
+  `"none"`.
+
 ## Keyboard shortcuts
 
 Choose **Open Keyboard Shortcuts** from the Pyde menu (`cmd+k cmd+s`) to edit
