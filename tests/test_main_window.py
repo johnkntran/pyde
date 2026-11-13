@@ -440,3 +440,31 @@ def test_find_follows_the_current_tab(window, file, tmp_path):
 
     assert second.textCursor().selectedText() == "ell"
     assert first.textCursor().selectedText() == "ell"
+
+
+# Go to File
+
+
+def test_go_to_file_lists_the_folder_and_opens_the_choice(window, tmp_path, wait_until):
+    folder = tmp_path / "project"
+    (folder / "src").mkdir(parents=True)
+    (folder / "src" / "editor.py").write_text("")
+    (folder / "README.md").write_text("")
+    window.open_folder(folder)
+    show(window, wait_until)
+
+    press(window, "cmd+p")
+    assert window.palette.isVisible()
+    QTest.keyClicks(window.palette.field, "edit")
+    QTest.keyClick(window.palette.field, Qt.Key.Key_Return)
+
+    assert tab_titles(window) == ["editor.py"]
+    assert window.current_editor().path == folder / "src" / "editor.py"
+    assert window.palette.isHidden()
+
+
+def test_go_to_file_without_a_folder_explains_itself(window):
+    run(window, "file.goToFile")
+
+    assert window.palette.isHidden()
+    assert window.statusBar().currentMessage() == "Open a folder to use Go to File"

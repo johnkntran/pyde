@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
 from pyde import __version__
 from pyde.commands import CommandRegistry
 from pyde.editor import CodeEditor
+from pyde.file_list import list_files
 from pyde.file_tree import FileTree
 from pyde.find_bar import FindBar
 from pyde.keybindings import Keybindings
+from pyde.palette import Palette
 
 RESOURCES = Path(__file__).parent / "resources"
 
@@ -97,6 +99,9 @@ class MainWindow(QMainWindow):
         # Without this the web view's size hint claims most of the window.
         self.resizeDocks([self.terminal_dock], [260], Qt.Orientation.Vertical)
 
+        # Floats over the top of the window while it is open.
+        self.palette = Palette(self)
+
         self.commands = CommandRegistry(self)
         self._add_commands()
 
@@ -126,6 +131,7 @@ class MainWindow(QMainWindow):
             ("file.new", "New File", self.new_file, "cmd+n"),
             ("file.open", "Open File…", self.pick_file, "cmd+o"),
             ("file.openFolder", "Open Folder…", self.pick_folder, "cmd+shift+o"),
+            ("file.goToFile", "Go to File…", self.go_to_file, "cmd+p"),
             ("file.save", "Save", self.save, "cmd+s"),
             ("file.saveAs", "Save As…", self.save_as, "cmd+shift+s"),
             ("file.closeTab", "Close Tab", self.close_tab, "cmd+w"),
@@ -224,6 +230,18 @@ class MainWindow(QMainWindow):
         chosen = QFileDialog.getExistingDirectory(self, "Open Folder", start)
         if chosen:
             self.open_folder(Path(chosen))
+
+    def go_to_file(self) -> None:
+        """Pick one of the open folder's files by typing part of its name."""
+        folder = self.folder
+        if folder is None:
+            self._report("Open a folder to use Go to File")
+            return
+        self.palette.open(
+            list_files(folder),
+            lambda relative_path: self.open_file(folder / relative_path),
+            placeholder="Go to file",
+        )
 
     def open_keybindings(self) -> None:
         self.open_file(self.keybindings.ensure_user_file())
