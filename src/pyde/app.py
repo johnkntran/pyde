@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--smoke-test",
         action="store_true",
-        help="start, check the web engine and syntax highlighting, then exit; "
+        help="start, check the terminal and syntax highlighting, then exit; "
         "used to verify packaged builds",
     )
     parser.add_argument(
@@ -52,19 +52,21 @@ def _run_smoke_test(app: QApplication, window: MainWindow) -> None:
     """Exit 0 if the parts a packaged build is most likely to lack all work.
 
     Those are the parts loaded by name at run time, which PyInstaller cannot
-    see when it decides what to bundle: the web engine's helper process and
-    page, and Pygments' lexers and styles.
+    see when it decides what to bundle: Pygments' lexers and styles, and the
+    terminal, which needs the web engine's helper process, the xterm.js files,
+    and a shell on a pseudo-terminal.
     """
     problems = _highlighting_problems()
 
-    def finish(loaded: bool) -> None:
-        if not loaded:
-            problems.append("the web view did not load")
+    def finish(terminal_started: bool) -> None:
+        if not terminal_started:
+            problems.append("the terminal did not start")
         for problem in problems:
             print(f"smoke test failed: {problem}", file=sys.stderr)
+        window.terminal_view.shutdown()
         app.exit(1 if problems else 0)
 
-    window.terminal_view.loadFinished.connect(finish)
+    window.terminal_view.started.connect(lambda: finish(True))
     QTimer.singleShot(SMOKE_TEST_TIMEOUT_MS, lambda: finish(False))
 
 

@@ -1,7 +1,8 @@
 # Pyde - The code editor written in Python
 
 Pyde is a desktop code editor built with Python and Qt (PySide6), with syntax
-highlighting by Pygments. It targets macOS 14 or later on Apple Silicon.
+highlighting by Pygments and a built-in terminal. It targets macOS 14 or later
+on Apple Silicon.
 
 ## Install
 
@@ -16,6 +17,13 @@ Security → Open Anyway, or clear the quarantine flag:
 ```sh
 xattr -dr com.apple.quarantine /Applications/Pyde.app
 ```
+
+## Terminal
+
+Press ``ctrl+` `` to show the terminal and type in it, and again to hide it
+and return to your file. It runs your login shell, so the tools on your usual
+path are available, and it starts in the folder you have open. Opening another
+folder restarts the shell there.
 
 ## Keyboard shortcuts
 
@@ -82,5 +90,7 @@ version in `pyproject.toml` is a placeholder that development builds report.
 
 Pyde's syntax highlighter adapts code from
 [qtconsole](https://github.com/jupyter/qtconsole) and
-[Pygments](https://pygments.org), both BSD-licensed. Their license texts are in
+[Pygments](https://pygments.org), both BSD-licensed. Its terminal is
+[xterm.js](https://xtermjs.org), MIT-licensed, which is included in
+`src/pyde/resources/xterm/` unmodified. Their license texts are in
 `src/pyde/licenses/` and ship inside the app.

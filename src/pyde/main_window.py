@@ -2,9 +2,8 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths, Qt, QUrl
+from PySide6.QtCore import QStandardPaths, Qt
 from PySide6.QtGui import QAction, QCloseEvent
-from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -26,8 +25,7 @@ from pyde.file_tree import FileTree
 from pyde.find_bar import FindBar
 from pyde.keybindings import Keybindings
 from pyde.palette import Palette
-
-RESOURCES = Path(__file__).parent / "resources"
+from pyde.terminal import TerminalView
 
 STATUS_MESSAGE_MS = 10_000
 # Appended to the tab title of a file with unsaved changes.
@@ -80,11 +78,7 @@ class MainWindow(QMainWindow):
         # There is nothing to show until a folder is opened.
         self.file_tree_dock.hide()
 
-        # The terminal will be xterm.js running in this web view. Until then it
-        # shows a static page, so every build already bundles and exercises
-        # QtWebEngine.
-        self.terminal_view = QWebEngineView()
-        self.terminal_view.load(QUrl.fromLocalFile(RESOURCES / "terminal.html"))
+        self.terminal_view = TerminalView()
         self.terminal_dock = self._add_dock(
             "Terminal",
             "terminal",
@@ -194,6 +188,7 @@ class MainWindow(QMainWindow):
     def open_folder(self, folder: Path) -> None:
         self.folder = folder.resolve()
         self.file_tree.set_folder(self.folder)
+        self.terminal_view.set_folder(self.folder)
         self.file_tree_dock.show()
         self.setWindowTitle(f"{self.folder.name} — Pyde")
 
@@ -290,6 +285,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if all(self._may_close(editor) for editor in self.editors()):
+            self.terminal_view.shutdown()
             event.accept()
         else:
             event.ignore()
@@ -352,7 +348,15 @@ class MainWindow(QMainWindow):
         self.file_tree_dock.setVisible(not self.file_tree_dock.isVisible())
 
     def toggle_terminal(self) -> None:
-        self.terminal_dock.setVisible(not self.terminal_dock.isVisible())
+        """Show the terminal and type into it, or hide it and return to the file."""
+        if self.terminal_dock.isVisible():
+            self.terminal_dock.hide()
+            editor = self.current_editor()
+            if editor is not None:
+                editor.setFocus()
+        else:
+            self.terminal_dock.show()
+            self.terminal_view.focus_terminal()
 
     def _report(self, text: str) -> None:
         self.statusBar().showMessage(text, STATUS_MESSAGE_MS)

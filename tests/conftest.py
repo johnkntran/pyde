@@ -5,6 +5,8 @@ import pytest
 
 # Keep windows off the screen while testing. This has to be set before Qt loads.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Terminals in tests run a plain shell, not the user's own with its profile.
+os.environ["SHELL"] = "/bin/sh"
 
 
 @pytest.fixture(scope="session")
