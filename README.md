@@ -1,1 +1,1 @@
-# Pyde - The IDE written in Python
+# Pyde - The code editor written in Python
