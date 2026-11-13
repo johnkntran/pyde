@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QTextCursor, QTextDocument
 from PySide6.QtWidgets import QPlainTextDocumentLayout
 
-from pyde.highlighter import DARK_STYLE, SyntaxHighlighter, lexer_for
+from pyde.highlighter import DARK_STYLE, SyntaxHighlighter, lexer_for, styles
 
 # Colors from Pygments' "default" style, which the tests run under.
 KEYWORD = "#008000"
@@ -128,6 +128,34 @@ def test_the_style_follows_the_system_color_scheme(qapp, color_at):
 
     scheme_changed.emit(Qt.ColorScheme.Light)
     assert color_at(document, 0, 0) == KEYWORD
+
+
+def test_changing_the_shared_styles_recolors_open_documents(qapp, color_at):
+    document, _ = highlighted("a.py", "return\n")
+    assert color_at(document, 0, 0) == KEYWORD
+
+    styles.set(light="xcode", dark=DARK_STYLE)
+
+    # The keyword color of the "xcode" style.
+    assert color_at(document, 0, 0) == "#a90d91"
+
+
+def test_a_new_document_starts_with_the_shared_styles(qapp, color_at):
+    styles.set(light="xcode", dark=DARK_STYLE)
+
+    document, _ = highlighted("a.py", "return\n")
+
+    assert color_at(document, 0, 0) == "#a90d91"
+
+
+def test_dark_mode_uses_the_shared_dark_style(qapp, color_at):
+    document, _ = highlighted("a.py", "return\n")
+    styles.set(light="default", dark="monokai")
+
+    QGuiApplication.styleHints().colorSchemeChanged.emit(Qt.ColorScheme.Dark)
+
+    # The keyword color of the "monokai" style.
+    assert color_at(document, 0, 0) == "#66d9ef"
 
 
 def test_pygments_is_left_as_it_was_found(qapp):

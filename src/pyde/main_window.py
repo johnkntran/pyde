@@ -33,6 +33,7 @@ from pyde.find_bar import FindBar
 from pyde.keybindings import Keybindings
 from pyde.notice_bar import NoticeBar
 from pyde.palette import Palette
+from pyde.settings import Settings
 from pyde.terminal import TerminalView
 
 STATUS_MESSAGE_MS = 10_000
@@ -120,11 +121,14 @@ class MainWindow(QMainWindow):
             self.commands, self._config_dir / "keybindings.json", parent=self
         )
         self.keybindings.message.connect(self._report)
+        self.settings = Settings(self._config_dir / "settings.json", parent=self)
+        self.settings.message.connect(self._report)
         # Shown at the right of the status bar while working in a container.
         self.container_label = QLabel()
         self.container_label.hide()
         self.statusBar().addPermanentWidget(self.container_label)
         self.keybindings.load()
+        self.settings.load()
 
     def _add_dock(
         self, title: str, name: str, widget: QWidget, area: Qt.DockWidgetArea
@@ -174,6 +178,7 @@ class MainWindow(QMainWindow):
         )
         preferences = self._add_menu(
             "Preferences",
+            ("preferences.openSettings", "Open Settings", self.open_settings, "cmd+,"),
             (
                 "preferences.openKeybindings",
                 "Open Keyboard Shortcuts",
@@ -186,10 +191,17 @@ class MainWindow(QMainWindow):
                 self.open_default_keybindings,
             ),
         )
-        # macOS moves actions with this role into the application menu, and
-        # hides the menu they came from once it is empty.
+        # macOS moves actions with these roles into the application menu, and
+        # hides the menu they came from once it is empty. The settings one
+        # takes the place macOS reserves for an app's settings.
+        settings = self.commands["preferences.openSettings"].action
         for action in preferences.actions():
-            action.setMenuRole(QAction.MenuRole.ApplicationSpecificRole)
+            is_settings = action is settings
+            action.setMenuRole(
+                QAction.MenuRole.PreferencesRole
+                if is_settings
+                else QAction.MenuRole.ApplicationSpecificRole
+            )
 
     def _add_menu(self, title: str, *commands: tuple) -> QMenu:
         """Add a menu of commands, each given as (id, title, callback, key)."""
@@ -267,6 +279,9 @@ class MainWindow(QMainWindow):
             lambda relative_path: self.open_file(folder / relative_path),
             placeholder="Go to file",
         )
+
+    def open_settings(self) -> None:
+        self.open_file(self.settings.ensure_user_file())
 
     def open_keybindings(self) -> None:
         self.open_file(self.keybindings.ensure_user_file())

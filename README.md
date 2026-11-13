@@ -60,6 +60,28 @@ goes back.
 - **On close:** the containers are stopped, unless `shutdownAction` is
   `"none"`.
 
+## Settings
+
+Choose **Settings…** from the Pyde menu (`cmd+,`) to edit
+`~/Library/Application Support/Pyde/settings.json`. Changes apply as soon as
+you save it.
+
+```jsonc
+{
+  // Which Pygments style colors the code, in light mode and in dark mode.
+  "theme": { "light": "xcode", "dark": "monokai" }
+}
+```
+
+- The file lists the styles to choose from, and
+  [pygments.org/styles](https://pygments.org/styles/) shows what each looks
+  like.
+- A mode you leave out keeps its usual style: `default` in light mode and
+  `github-dark` in dark mode.
+- Only the code's colors change. The background, the rest of the window, and
+  the terminal keep their own colors, so a style made for a dark background
+  is hard to read in light mode, and the other way around.
+
 ## Keyboard shortcuts
 
 Choose **Open Keyboard Shortcuts** from the Pyde menu (`cmd+k cmd+s`) to edit

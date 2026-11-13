@@ -29,7 +29,7 @@ from pygments.lexers import get_lexer_for_filename
 from pygments.styles import get_style_by_name
 from pygments.token import Error, Whitespace, _TokenType
 from pygments.util import ClassNotFound
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -41,6 +41,31 @@ from PySide6.QtGui import (
 
 LIGHT_STYLE = "default"
 DARK_STYLE = "github-dark"
+
+
+class _Styles(QObject):
+    """The Pygments style used in light mode and the one used in dark mode.
+
+    Every highlighter shares these, and recolors when they change.
+    """
+
+    changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.light = LIGHT_STYLE
+        self.dark = DARK_STYLE
+
+    def set(self, light: str, dark: str) -> None:
+        if (light, dark) != (self.light, self.dark):
+            self.light, self.dark = light, dark
+            self.changed.emit()
+
+    def name_for(self, scheme: Qt.ColorScheme) -> str:
+        return self.dark if scheme == Qt.ColorScheme.Dark else self.light
+
+
+styles = _Styles()
 
 
 def lexer_for(filename: str, text: str = "") -> Lexer | None:
@@ -153,7 +178,8 @@ class SyntaxHighlighter(QSyntaxHighlighter):
 
         hints = QGuiApplication.styleHints()
         hints.colorSchemeChanged.connect(self._follow_color_scheme)
-        self._style = get_style_by_name(self._style_name(hints.colorScheme()))
+        styles.changed.connect(self._follow_styles)
+        self._style = get_style_by_name(styles.name_for(hints.colorScheme()))
 
     def highlightBlock(self, text: str) -> None:
         lexer = self._lexer
@@ -180,11 +206,11 @@ class SyntaxHighlighter(QSyntaxHighlighter):
         self.rehighlight()
 
     def _follow_color_scheme(self, scheme: Qt.ColorScheme) -> None:
-        self.set_style(self._style_name(scheme))
+        self.set_style(styles.name_for(scheme))
 
-    @staticmethod
-    def _style_name(scheme: Qt.ColorScheme) -> str:
-        return DARK_STYLE if scheme == Qt.ColorScheme.Dark else LIGHT_STYLE
+    def _follow_styles(self) -> None:
+        scheme = QGuiApplication.styleHints().colorScheme()
+        self.set_style(styles.name_for(scheme))
 
     def _state_id(self, stack: tuple[str, ...]) -> int:
         if stack not in self._state_ids:

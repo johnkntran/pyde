@@ -709,3 +709,39 @@ def test_a_bring_up_waits_for_the_containers_to_finish_stopping(
         if "up" in call or call == ["stop-finished"]
     ]
     assert steps == ["up", "stop-finished", "up"]
+
+
+# Settings
+
+
+def test_open_settings_creates_the_file_and_opens_it_in_a_tab(window, tmp_path):
+    run(window, "preferences.openSettings")
+
+    assert tab_titles(window) == ["settings.json"]
+    assert window.current_editor().path == tmp_path / "config" / "settings.json"
+    assert "theme" in window.current_editor().toPlainText()
+
+
+def test_saving_the_settings_file_in_pyde_recolors_open_code(
+    window, tmp_path, color_at, wait_until
+):
+    code = tmp_path / "script.py"
+    code.write_text("return 1\n")
+    script = window.open_file(code)
+    wait_until(lambda: color_at(script.document(), 0, 0) == "#008000")
+
+    run(window, "preferences.openSettings")
+    window.current_editor().setPlainText('{"theme": {"light": "xcode"}}')
+    window.save()
+
+    wait_until(lambda: color_at(script.document(), 0, 0) == "#a90d91")
+    assert window.statusBar().currentMessage() == "Settings reloaded"
+
+
+def test_a_mistake_in_the_settings_file_shows_in_the_status_bar(qapp, tmp_path):
+    (tmp_path / "settings.json").write_text('{"theme": {"dark": "no-such-style"}}')
+
+    window = MainWindow(config_dir=tmp_path)
+
+    assert "unknown style 'no-such-style'" in window.statusBar().currentMessage()
+    window.close()
