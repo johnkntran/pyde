@@ -17,13 +17,33 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def no_unexpected_dialogs(monkeypatch):
+    """Fail, rather than hang, if a dialog opens that the test did not answer.
+
+    A test that expects a dialog replaces the same function with its answer.
+    """
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("a dialog opened that the test did not expect")
+
+    monkeypatch.setattr(QMessageBox, "warning", unexpected)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", unexpected)
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", unexpected)
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", unexpected)
+
+
 @pytest.fixture
 def window(qapp, tmp_path):
     """A main window whose settings live in a temporary folder."""
     from pyde.main_window import MainWindow
 
-    window = MainWindow(config_dir=tmp_path)
+    window = MainWindow(config_dir=tmp_path / "config")
     yield window
+    # Closing would otherwise ask about any changes the test left unsaved.
+    for editor in window.editors():
+        editor.document().setModified(False)
     window.close()
 
 

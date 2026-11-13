@@ -37,6 +37,8 @@ to keys, and changes apply as soon as you save it:
   command with its default key.
 - If something in the file is wrong, the status bar at the bottom of the
   window says what.
+- Only Pyde's own commands can be rebound. The standard text-editing keys,
+  such as copy, paste, undo, and cursor movement, are fixed.
 
 ## Develop
 
@@ -45,6 +47,7 @@ dependencies for you.
 
 ```sh
 uv run pyde             # launch the app
+uv run pyde .           # launch it on a folder (or pass a file)
 uv run pytest           # run the tests
 uv run ruff check       # lint
 uv run ruff format      # format
