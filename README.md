@@ -36,20 +36,20 @@ the embedded web engine to load a page, and exits with status 0 on success.
 
 ## Release
 
-1. Bump the version with `uv version --bump patch` (or `minor`, `major`) and
-   merge that change into `main`.
-2. Create the matching tag, such as `v0.1.0`, in either of two ways:
+Create a new version tag, such as `v0.2.0`, in either of two ways:
 
-   - On GitHub, draft a new release that creates the tag. Your title and
-     notes are kept.
-   - From the command line, push the tag. The release is created for you with
-     generated notes.
+- On GitHub, draft a new release that creates the tag, and publish it. Your
+  title and notes are kept.
+- From the command line, push the tag. The release is created for you with
+  generated notes.
 
-     ```sh
-     git tag v0.1.0
-     git push origin v0.1.0
-     ```
+  ```sh
+  git tag v0.2.0
+  git push origin v0.2.0
+  ```
 
 GitHub Actions then tests the code, builds the `.dmg`, and attaches it to the
-release a few minutes later. The tag has to match the version in
-`pyproject.toml`, or the build stops before publishing.
+release a few minutes later.
+
+The tag is the only place the version is set: `v0.2.0` builds Pyde 0.2.0. The
+version in `pyproject.toml` is a placeholder that development builds report.

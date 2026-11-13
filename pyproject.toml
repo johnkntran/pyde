@@ -1,6 +1,8 @@
 [project]
 name = "pyde"
-version = "0.1.0"
+# Placeholder for development builds. A release takes its version from its git
+# tag; see .github/workflows/ci.yml.
+version = "0.0.0"
 description = "The code editor written in Python"
 readme = "README.md"
 requires-python = ">=3.13"
