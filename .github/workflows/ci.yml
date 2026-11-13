@@ -75,6 +75,8 @@ jobs:
           Write-Output "bad flag exit status: $($bad.ExitCode)"
           if ($bad.ExitCode -eq 0) { exit 1 }
           Get-ChildItem dist\Pyde\_internal\winpty | Select-Object -ExpandProperty Name
+          uv run pyde --smoke-test
+          Write-Output "unpackaged smoke test exit status: $LASTEXITCODE"
       - uses: actions/upload-artifact@v7
         with:
           name: windows

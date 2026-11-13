@@ -8,11 +8,17 @@ from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 APP_NAME = "Pyde"
 
+# The package's non-Python files, plus its metadata so the app can read its
+# own version at runtime.
+datas = collect_data_files("pyde") + copy_metadata("pyde")
+if sys.platform == "win32":
+    # The helper programs pywinpty starts for the terminal. PyInstaller finds
+    # its libraries but not these.
+    datas += collect_data_files("winpty", includes=["*.exe"])
+
 a = Analysis(
     ["src/pyde/__main__.py"],
-    # The package's non-Python files, plus its metadata so the app can read its
-    # own version at runtime.
-    datas=collect_data_files("pyde") + copy_metadata("pyde"),
+    datas=datas,
     # QtWebEngine links against Qt Quick, which makes PyInstaller pull in every
     # QML plugin and the ~110 frameworks behind them. Pyde uses no QML, and
     # leaving these bindings out drops about 100 MB from the app.

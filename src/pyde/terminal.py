@@ -136,6 +136,8 @@ class TerminalView(QWebEngineView):
         self._task = None
         # The page's size in rows and columns; None until it has loaded.
         self._size: tuple[int, int] | None = None
+        # Whether anything running in the terminal has written to it yet.
+        self.has_output = False
         # Characters sent to the page that it has not yet drawn.
         self._unacknowledged = 0
         # Output waiting to be sent to the page in one go.
@@ -144,7 +146,7 @@ class TerminalView(QWebEngineView):
         self._outbox_timer.timeout.connect(self._send_outbox)
 
         self._session = PtySession(self)
-        self._session.output.connect(self._send)
+        self._session.output.connect(self._wrote)
         self._session.exited.connect(self._exited)
 
         self._bridge = _Bridge(self)
@@ -248,6 +250,10 @@ class TerminalView(QWebEngineView):
             done = self._task[2]
             self._task = None
             done(status)
+
+    def _wrote(self, text: str) -> None:
+        self.has_output = True
+        self._send(text)
 
     def _send(self, text: str) -> None:
         """Show text in the terminal, shortly."""
