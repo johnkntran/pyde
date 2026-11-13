@@ -66,6 +66,15 @@ jobs:
         run: |
           $app = Start-Process dist\Pyde\Pyde.exe -ArgumentList "--smoke-test" -Wait -PassThru
           exit $app.ExitCode
+      - name: TEMPORARY check that the smoke test's exit status is seen
+        run: |
+          $started = Get-Date
+          $app = Start-Process dist\Pyde\Pyde.exe -ArgumentList "--smoke-test" -Wait -PassThru
+          Write-Output "smoke test exit status: $($app.ExitCode) after $(((Get-Date) - $started).TotalSeconds) s"
+          $bad = Start-Process dist\Pyde\Pyde.exe -ArgumentList "--no-such-flag" -Wait -PassThru
+          Write-Output "bad flag exit status: $($bad.ExitCode)"
+          if ($bad.ExitCode -eq 0) { exit 1 }
+          Get-ChildItem dist\Pyde\_internal\winpty | Select-Object -ExpandProperty Name
       - uses: actions/upload-artifact@v7
         with:
           name: windows
