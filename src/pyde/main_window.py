@@ -256,13 +256,14 @@ class MainWindow(QMainWindow):
         return bool(chosen) and self._write(editor, Path(chosen))
 
     def close_tab(self, index: int | None = None) -> bool:
-        """Close a tab, by default the current one. Returns False if canceled.
+        """Close a tab, by default the current one. Returns whether it closed.
 
-        With no tabs open, closes the window, as cmd+w does elsewhere on macOS.
+        With no tabs open this does nothing. It never closes the window:
+        quitting is cmd+q's job.
         """
         editor = self.current_editor() if index is None else self.tabs.widget(index)
         if editor is None:
-            return self.close()
+            return False
         if not self._may_close(editor):
             return False
         self.tabs.removeTab(self.tabs.indexOf(editor))

@@ -372,12 +372,16 @@ def test_closing_the_window_with_unsaved_changes_can_be_canceled(
     assert window.isVisible()
 
 
-def test_close_tab_with_no_tabs_closes_the_window(window, wait_until):
+def test_the_close_tab_key_closes_tabs_but_never_the_window(window, file, wait_until):
+    window.open_file(file)
     show(window, wait_until)
 
     press(window, "cmd+w")
+    assert window.tabs.count() == 0
 
-    assert not window.isVisible()
+    press(window, "cmd+w")
+    assert window.isVisible()
+    assert not window.close_tab()
 
 
 # Tabs, panels, and find
