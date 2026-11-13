@@ -1,7 +1,8 @@
 name: CI
 
-# Pull requests get linted, tested, and packaged. Pushing a version tag such as
-# v0.1.0 does the same and then publishes the disk image as a GitHub Release.
+# Pull requests get linted, tested, and packaged. A new version tag such as
+# v0.1.0 does the same and then publishes the disk image to that tag's GitHub
+# Release, creating the release if it does not exist yet.
 on:
   pull_request:
   push:
@@ -53,7 +54,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: dmg
-      - name: Publish the GitHub Release
-        run: gh release create "$GITHUB_REF_NAME" *.dmg --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+      - name: Publish the disk image to the GitHub Release
+        # Creating a release on GitHub's website also creates its tag, so the
+        # release may already exist by the time this runs.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" *.dmg --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" *.dmg --generate-notes --verify-tag
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
