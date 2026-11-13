@@ -1,10 +1,12 @@
 """The main application window."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, Qt
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
+    QComboBox,
     QDockWidget,
     QFileDialog,
     QLabel,
@@ -33,6 +35,7 @@ from pyde.find_bar import FindBar
 from pyde.keybindings import Keybindings
 from pyde.notice_bar import NoticeBar
 from pyde.palette import Palette
+from pyde.preview import FileView
 from pyde.terminal import TerminalView
 
 STATUS_MESSAGE_MS = 10_000
@@ -65,6 +68,15 @@ class MainWindow(QMainWindow):
         # when there are none, with the find bar underneath.
         self.tabs = QTabWidget(documentMode=True, tabsClosable=True, movable=True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
+        # At the right of the tab bar, for files that have a preview: whether
+        # the current file shows as its raw text or as that preview.
+        self.view_picker = QComboBox()
+        self.view_picker.addItems(["Raw", "Preview"])
+        self.view_picker.activated.connect(
+            lambda choice: self.set_previewing(choice == 1)
+        )
+        self.tabs.setCornerWidget(self.view_picker)
+        self.tabs.currentChanged.connect(self._update_view_picker)
         placeholder = QLabel(f"Pyde {__version__}")
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder.setEnabled(False)
@@ -160,10 +172,15 @@ class MainWindow(QMainWindow):
         )
         self._add_menu(
             "Edit",
-            ("edit.find", "Find", find.show_find, "cmd+f"),
-            ("edit.replace", "Replace", find.show_replace, "cmd+alt+f"),
-            ("edit.findNext", "Find Next", find.find_next, "cmd+g"),
-            ("edit.findPrevious", "Find Previous", find.find_previous, "cmd+shift+g"),
+            ("edit.find", "Find", self._in_raw(find.show_find), "cmd+f"),
+            ("edit.replace", "Replace", self._in_raw(find.show_replace), "cmd+alt+f"),
+            ("edit.findNext", "Find Next", self._in_raw(find.find_next), "cmd+g"),
+            (
+                "edit.findPrevious",
+                "Find Previous",
+                self._in_raw(find.find_previous),
+                "cmd+shift+g",
+            ),
         )
         self._add_menu(
             "View",
@@ -171,6 +188,12 @@ class MainWindow(QMainWindow):
             ("view.toggleTerminal", "Toggle Terminal", self.toggle_terminal, "ctrl+`"),
             ("view.nextTab", "Next Tab", self.next_tab, "ctrl+tab"),
             ("view.previousTab", "Previous Tab", self.previous_tab, "ctrl+shift+tab"),
+            (
+                "view.togglePreview",
+                "Toggle Preview",
+                self.toggle_preview,
+                "cmd+shift+v",
+            ),
         )
         preferences = self._add_menu(
             "Preferences",
@@ -200,11 +223,16 @@ class MainWindow(QMainWindow):
 
     # Opening
 
-    def current_editor(self) -> CodeEditor | None:
+    def current_view(self) -> FileView | None:
+        """The current tab: a file's editor together with its preview."""
         return self.tabs.currentWidget()
 
+    def current_editor(self) -> CodeEditor | None:
+        view = self.current_view()
+        return view.editor if view else None
+
     def editors(self) -> list[CodeEditor]:
-        return [self.tabs.widget(index) for index in range(self.tabs.count())]
+        return [self.tabs.widget(index).editor for index in range(self.tabs.count())]
 
     def open_path(self, path: Path) -> None:
         """Open a folder in the file tree, or a file in a tab."""
@@ -227,7 +255,7 @@ class MainWindow(QMainWindow):
         path = path.resolve()
         for editor in self.editors():
             if editor.path == path:
-                self.tabs.setCurrentWidget(editor)
+                self.tabs.setCurrentWidget(editor.parentWidget())
                 return editor
 
         editor = CodeEditor()
@@ -304,13 +332,13 @@ class MainWindow(QMainWindow):
         With no tabs open this does nothing. It never closes the window:
         quitting is cmd+q's job.
         """
-        editor = self.current_editor() if index is None else self.tabs.widget(index)
-        if editor is None:
+        view = self.current_view() if index is None else self.tabs.widget(index)
+        if view is None:
             return False
-        if not self._may_close(editor):
+        if not self._may_close(view.editor):
             return False
-        self.tabs.removeTab(self.tabs.indexOf(editor))
-        editor.deleteLater()
+        self.tabs.removeTab(self.tabs.indexOf(view))
+        view.deleteLater()
         return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -325,7 +353,7 @@ class MainWindow(QMainWindow):
         """Offer to save an editor's unsaved changes. False means canceled."""
         if not editor.document().isModified():
             return True
-        self.tabs.setCurrentWidget(editor)
+        self.tabs.setCurrentWidget(editor.parentWidget())
         buttons = QMessageBox.StandardButton
         answer = QMessageBox.warning(
             self,
@@ -350,19 +378,59 @@ class MainWindow(QMainWindow):
     # Tabs and panels
 
     def _add_tab(self, editor: CodeEditor) -> None:
-        self.tabs.addTab(editor, "")
+        view = FileView(editor)
+        self.tabs.addTab(view, "")
         editor.document().modificationChanged.connect(
             lambda _modified: self._label_tab(editor)
         )
         self._label_tab(editor)
-        self.tabs.setCurrentWidget(editor)
+        self.tabs.setCurrentWidget(view)
         editor.setFocus()
 
     def _label_tab(self, editor: CodeEditor) -> None:
-        index = self.tabs.indexOf(editor)
+        index = self.tabs.indexOf(editor.parentWidget())
         modified = editor.document().isModified()
         self.tabs.setTabText(index, editor.title + (MODIFIED_MARK if modified else ""))
         self.tabs.setTabToolTip(index, str(editor.path or ""))
+        # Saving under a new name can give a file a preview, or take it away.
+        self._update_view_picker()
+
+    # Previews
+
+    def set_previewing(self, previewing: bool) -> None:
+        """Show the current file as its preview, or as raw text to edit."""
+        view = self.current_view()
+        if view is None:
+            return
+        view.set_previewing(previewing)
+        view.currentWidget().setFocus()
+        self._update_view_picker()
+
+    def toggle_preview(self) -> None:
+        view = self.current_view()
+        if view is None or not view.can_preview:
+            self._report("Only Markdown, CSV, and TSV files have a preview")
+            return
+        self.set_previewing(not view.previewing)
+
+    def _update_view_picker(self) -> None:
+        """Make the picker match the current file."""
+        view = self.current_view()
+        if view is not None and view.previewing and not view.can_preview:
+            view.set_previewing(False)
+        self.view_picker.setVisible(view is not None and view.can_preview)
+        self.view_picker.setCurrentIndex(1 if view and view.previewing else 0)
+
+    def _in_raw(self, action: Callable[[], object]) -> Callable[[], None]:
+        """A command that works on the text, so leaves any preview first."""
+
+        def run() -> None:
+            view = self.current_view()
+            if view is not None and view.previewing:
+                self.set_previewing(False)
+            action()
+
+        return run
 
     def next_tab(self) -> None:
         self._step_tab(1)
@@ -382,9 +450,9 @@ class MainWindow(QMainWindow):
         """Show the terminal and type into it, or hide it and return to the file."""
         if self.terminal_dock.isVisible():
             self.terminal_dock.hide()
-            editor = self.current_editor()
-            if editor is not None:
-                editor.setFocus()
+            view = self.current_view()
+            if view is not None:
+                view.currentWidget().setFocus()
         else:
             self.terminal_dock.show()
             self.terminal_view.focus_terminal()
