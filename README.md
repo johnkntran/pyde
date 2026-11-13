@@ -17,6 +17,27 @@ Security → Open Anyway, or clear the quarantine flag:
 xattr -dr com.apple.quarantine /Applications/Pyde.app
 ```
 
+## Keyboard shortcuts
+
+Choose **Open Keyboard Shortcuts** from the Pyde menu (`cmd+k cmd+s`) to edit
+`~/Library/Application Support/Pyde/keybindings.json`. The file maps commands
+to keys, and changes apply as soon as you save it:
+
+```jsonc
+{
+  "view.toggleTerminal": "cmd+j", // a different key
+  "preferences.openKeybindings": "" // no shortcut at all
+}
+```
+
+- Keys are written like `cmd+p` or `cmd+shift+f`. The modifiers are `cmd`,
+  `ctrl`, `alt` (or `option`), and `shift`.
+- A two-step shortcut is two keys separated by a space, like `cmd+k cmd+s`.
+- **Open Default Keyboard Shortcuts**, also in the Pyde menu, lists every
+  command with its default key.
+- If something in the file is wrong, the status bar at the bottom of the
+  window says what.
+
 ## Develop
 
 You need [uv](https://docs.astral.sh/uv/); it installs Python and the
