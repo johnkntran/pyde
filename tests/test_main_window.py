@@ -468,3 +468,39 @@ def test_go_to_file_without_a_folder_explains_itself(window):
 
     assert window.palette.isHidden()
     assert window.statusBar().currentMessage() == "Open a folder to use Go to File"
+
+
+# Terminal
+
+
+def test_toggling_the_terminal_moves_keyboard_focus_with_it(window, file, wait_until):
+    editor = window.open_file(file)
+    show(window, wait_until)
+    terminal = window.terminal_view
+
+    press(window, "ctrl+`")
+    assert not window.terminal_dock.isVisible()
+    assert editor.hasFocus()
+
+    press(window, "ctrl+`")
+    assert window.terminal_dock.isVisible()
+    focused = window.focusWidget()
+    assert focused is terminal or terminal.isAncestorOf(focused)
+
+
+def test_opening_a_folder_points_the_terminal_at_it(window, tmp_path):
+    folder = tmp_path / "project"
+    folder.mkdir()
+
+    window.open_folder(folder)
+
+    assert window.terminal_view.folder == folder
+
+
+def test_closing_the_window_ends_the_terminals_shell(window, wait_until):
+    show(window, wait_until)
+    wait_until(lambda: window.terminal_view.running, timeout=30)
+
+    window.close()
+
+    assert not window.terminal_view.running
