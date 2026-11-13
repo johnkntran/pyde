@@ -2,6 +2,7 @@
 
 import os
 import pwd
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QLocale, QObject, Qt, QTimer, QUrl, Signal, Slot
@@ -34,9 +35,13 @@ def default_shell() -> str:
     return os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell
 
 
-def shell_environment() -> dict[str, str]:
-    """The environment a shell in the terminal starts with."""
-    env = dict(os.environ)
+def shell_environment(base: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a program in the terminal starts with.
+
+    It is Pyde's own environment, or `base` if given, plus what describes the
+    terminal itself.
+    """
+    env = dict(os.environ if base is None else base)
     env.update(
         TERM="xterm-256color",
         COLORTERM="truecolor",
@@ -87,13 +92,26 @@ class _Bridge(QObject):
 
 
 class TerminalView(QWebEngineView):
+    """A terminal that runs a shell, and now and then a one-off task instead.
+
+    The shell is the user's own login shell unless `use_shell` says otherwise,
+    as it does to put the terminal inside a dev container.
+    """
+
     # The page has loaded and a shell is running in it.
     started = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # Where shells start.
+        # Where shells and tasks start.
         self.folder = Path.home()
+        # The shell's command and environment; None means the user's own.
+        self._shell: list[str] | None = None
+        self._shell_env: dict[str, str] | None = None
+        # The one-off task running in place of the shell, if any: its command,
+        # its environment, and what to call with its exit status.
+        self._task: tuple[list[str], dict[str, str], Callable[[int], None]] | None
+        self._task = None
         # The page's size in rows and columns; None until it has loaded.
         self._size: tuple[int, int] | None = None
         # Characters sent to the page that it has not yet drawn.
@@ -105,7 +123,7 @@ class TerminalView(QWebEngineView):
 
         self._session = PtySession(self)
         self._session.output.connect(self._send)
-        self._session.exited.connect(lambda: self._send(EXITED_NOTICE))
+        self._session.exited.connect(self._exited)
 
         self._bridge = _Bridge(self)
         channel = QWebChannel(self)
@@ -116,15 +134,45 @@ class TerminalView(QWebEngineView):
 
     @property
     def running(self) -> bool:
-        """Whether a shell is currently running in the terminal."""
+        """Whether a shell or task is currently running in the terminal."""
         return self._session.running
 
     def set_folder(self, folder: Path) -> None:
-        """Start shells in `folder`, replacing the current shell with one there."""
+        """Work in `folder`, starting the user's own shell there."""
         self.folder = folder
-        if self._size is not None:
+        self.use_shell()
+
+    def use_shell(
+        self,
+        argv: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        clear: bool = True,
+    ) -> None:
+        """Run `argv` as the terminal's shell from now on, and start it.
+
+        With no command it is the user's own login shell. Whatever was running,
+        shell or task, is ended; a task ended this way is not reported.
+        """
+        self._shell, self._shell_env = argv, env
+        self._task = None
+        if clear and self._size is not None:
             self._send(RESET)
-            self._start_shell()
+        self._start()
+
+    def run_task(
+        self, argv: list[str], env: dict[str, str], done: Callable[[int], None]
+    ) -> None:
+        """Run a command in place of the shell, where the user can watch it.
+
+        `done` is called with its exit status. Nothing runs in the terminal
+        after that until `use_shell` is called or the user presses Return.
+        """
+        self._task = (argv, env, done)
+        self._start()
+
+    def show_message(self, text: str) -> None:
+        """Write a line of Pyde's own into the terminal."""
+        self._send(f"\r\n{text}\r\n")
 
     def focus_terminal(self) -> None:
         """Put keyboard focus in the terminal, ready to type a command."""
@@ -140,14 +188,14 @@ class TerminalView(QWebEngineView):
     def page_ready(self, rows: int, columns: int) -> None:
         self._size = (rows, columns)
         self._send_theme(QGuiApplication.styleHints().colorScheme())
-        self._start_shell()
+        self._start()
         self.started.emit()
 
     def typed(self, text: str) -> None:
         if self._session.running:
             self._session.write(text)
         elif "\r" in text:
-            self._start_shell()
+            self._start()
 
     def resized(self, rows: int, columns: int) -> None:
         self._size = (rows, columns)
@@ -158,11 +206,25 @@ class TerminalView(QWebEngineView):
         if self._unacknowledged < LOW_WATER_MARK:
             self._session.set_paused(False)
 
-    def _start_shell(self) -> None:
-        rows, columns = self._size
-        self._session.start(
-            default_shell(), self.folder, shell_environment(), rows, columns
-        )
+    def _start(self) -> None:
+        """Start the task if there is one, and otherwise the shell."""
+        if self._size is None:
+            # The page is still loading, and starts this when it is ready.
+            return
+        if self._task is not None:
+            argv, env, _ = self._task
+        else:
+            argv = self._shell or [default_shell(), "-l"]
+            env = self._shell_env or shell_environment()
+        self._session.start(argv, self.folder, env, *self._size)
+
+    def _exited(self, status: int) -> None:
+        if self._task is None:
+            self._send(EXITED_NOTICE)
+        else:
+            done = self._task[2]
+            self._task = None
+            done(status)
 
     def _send(self, text: str) -> None:
         """Show text in the terminal, shortly."""

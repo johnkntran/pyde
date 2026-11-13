@@ -1,4 +1,4 @@
-"""A shell running on a pseudo-terminal, driven from the Qt event loop."""
+"""A program running on a pseudo-terminal, driven from the Qt event loop."""
 
 import codecs
 import fcntl
@@ -17,19 +17,20 @@ EXIT_POLL_MS = 200
 # How long a shell gets to exit on its own when stopped, before it is killed.
 STOP_GRACE_SECONDS = 0.5
 
-# Runs under /bin/sh: go to the folder in $0, then become a login shell, so
-# that it reads the user's profile and finds the same tools their terminal does.
-# The folder may have been deleted; a shell somewhere beats no shell at all.
-_LAUNCH = 'cd -- "$0" 2>/dev/null; exec "$1" -l'
+# Runs under /bin/sh: go to the folder in $0, then become the program in the
+# remaining arguments. The folder may have been deleted; a shell somewhere
+# beats no shell at all.
+_LAUNCH = 'cd -- "$0" 2>/dev/null; exec "$@"'
 
 
 class PtySession(QObject):
-    """One shell process and the terminal device it is attached to."""
+    """One process, usually a shell, and the terminal device it is attached to."""
 
-    # Text the shell wrote to the terminal.
+    # Text the program wrote to the terminal.
     output = Signal(str)
-    # The shell process has ended.
-    exited = Signal()
+    # The program has ended, with this exit status: its exit code, or the
+    # negative of the number of the signal that killed it.
+    exited = Signal(int)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -50,9 +51,14 @@ class PtySession(QObject):
         return self._pid is not None
 
     def start(
-        self, shell: str, folder: Path, env: dict[str, str], rows: int, columns: int
+        self,
+        argv: list[str],
+        folder: Path,
+        env: dict[str, str],
+        rows: int,
+        columns: int,
     ) -> None:
-        """Start `shell` as a login shell in `folder`, replacing any current one."""
+        """Run a command in `folder`, replacing whatever was running."""
         self.stop()
         master = os.posix_openpt(os.O_RDWR | os.O_NOCTTY)
         os.grantpt(master)
@@ -78,10 +84,10 @@ class PtySession(QObject):
             (os.POSIX_SPAWN_DUP2, stdin, stdout),
             (os.POSIX_SPAWN_DUP2, stdin, stderr),
         ]
-        argv = ["/bin/sh", "-c", _LAUNCH, str(folder), shell]
+        launch = ["/bin/sh", "-c", _LAUNCH, str(folder), *argv]
         try:
             self._pid = os.posix_spawn(
-                "/bin/sh", argv, env, file_actions=file_actions, setsid=True
+                "/bin/sh", launch, env, file_actions=file_actions, setsid=True
             )
         except OSError:
             self._release()
@@ -163,9 +169,12 @@ class PtySession(QObject):
             self._writer.setEnabled(False)
 
     def _check_exited(self) -> None:
-        if self._pid is not None and os.waitpid(self._pid, os.WNOHANG)[0]:
+        if self._pid is None:
+            return
+        pid, status = os.waitpid(self._pid, os.WNOHANG)
+        if pid:
             self._release()
-            self.exited.emit()
+            self.exited.emit(os.waitstatus_to_exitcode(status))
 
     def _release(self) -> None:
         """Forget the shell and close the terminal device."""
