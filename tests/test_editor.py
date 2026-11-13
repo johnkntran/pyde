@@ -175,3 +175,44 @@ def test_the_line_number_gutter_widens_for_longer_files(editor):
 
     assert editor.line_number_area_width() > narrow
     assert editor.viewportMargins().left() == editor.line_number_area_width()
+
+
+def test_a_file_is_colored_by_its_type_without_counting_as_an_edit(
+    editor, tmp_path, color_at, wait_until
+):
+    path = tmp_path / "script.py"
+    path.write_text("return 1\n")
+
+    editor.load(path)
+
+    wait_until(lambda: color_at(editor.document(), 0, 0) == "#008000")
+    assert not editor.document().isModified()
+    assert not editor.document().isUndoAvailable()
+
+
+def test_a_file_of_unknown_type_is_left_uncolored(
+    editor, tmp_path, color_at, wait_until
+):
+    path = tmp_path / "script.unknownext"
+    path.write_text("return 1\n")
+
+    editor.load(path)
+    QTest.qWait(50)
+
+    assert color_at(editor.document(), 0, 0) is None
+
+
+def test_saving_under_a_new_name_recolors_for_the_new_type(
+    editor, tmp_path, color_at, wait_until
+):
+    editor.setPlainText("return 1\n")
+
+    editor.save(tmp_path / "script.py")
+    wait_until(lambda: color_at(editor.document(), 0, 0) == "#008000")
+
+    editor.save(tmp_path / "script.unknownext")
+    wait_until(lambda: color_at(editor.document(), 0, 0) is None)
+
+    # Swapping the colors in and out is not an edit.
+    assert not editor.document().isModified()
+    assert not editor.document().isUndoAvailable()

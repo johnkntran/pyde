@@ -59,3 +59,21 @@ def wait_until(qapp):
             QTest.qWait(20)
 
     return wait_until
+
+
+@pytest.fixture
+def color_at():
+    """Look up the text color the syntax highlighter gave a character."""
+    from PySide6.QtCore import Qt
+
+    def color_at(document, line, column):
+        """The color as "#rrggbb", or None where the text has the default color."""
+        block = document.findBlockByNumber(line)
+        for span in block.layout().formats():
+            if span.start <= column < span.start + span.length:
+                brush = span.format.foreground()
+                if brush.style() != Qt.BrushStyle.NoBrush:
+                    return brush.color().name()
+        return None
+
+    return color_at
