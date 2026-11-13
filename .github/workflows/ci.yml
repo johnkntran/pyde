@@ -13,7 +13,11 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  build:
+    # Testing and packaging share one job because macOS runners are scarce:
+    # GitHub cancels a job that waits 15 minutes for one, so every extra job is
+    # another chance for the run to fail. macos-latest is Apple Silicon, the
+    # only architecture Pyde ships for.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,15 +27,6 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pytest
-
-  package:
-    # macos-latest is Apple Silicon, which is the only architecture Pyde ships for.
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-      # setup-uv publishes no floating major tag, so it is pinned to a release.
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - run: uv sync --locked
       - name: Take the version from the tag
         if: github.ref_type == 'tag'
         run: uv version "${GITHUB_REF_NAME#v}"
@@ -47,7 +42,7 @@ jobs:
 
   release:
     if: github.ref_type == 'tag'
-    needs: [test, package]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
