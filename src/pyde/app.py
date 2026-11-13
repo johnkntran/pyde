@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
@@ -24,6 +25,9 @@ def main(argv: list[str] | None = None) -> int:
         help="start, wait for the web engine to load a page, then exit; "
         "used to verify packaged builds",
     )
+    parser.add_argument(
+        "path", nargs="?", type=Path, help="a folder or file to open at startup"
+    )
     args = parser.parse_args(argv)
 
     app = QApplication(sys.argv[:1])
@@ -31,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationVersion(__version__)
 
     window = MainWindow()
+    if args.path:
+        window.open_path(args.path)
     if args.smoke_test:
         _exit_when_web_view_loads(app, window)
     window.show()
