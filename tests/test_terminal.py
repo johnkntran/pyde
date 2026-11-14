@@ -3,12 +3,14 @@ import os
 import sys
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QAction, QGuiApplication, QKeyEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWidgets import QApplication
 
 from pyde import terminal as terminal_module
+from pyde.keybindings import to_key_sequence
 from pyde.terminal import TerminalView, default_shell, shell_environment
 
 pytestmark = pytest.mark.skipif(
@@ -65,6 +67,10 @@ class Harness:
         self.view.focus_terminal()
         focused = "document.activeElement.className === 'xterm-helper-textarea'"
         self.wait_until(lambda: self.evaluate(focused))
+        # Qt hears a moment later that the page now has a text field to type
+        # in, and until then treats its keys differently.
+        typing = Qt.InputMethodQuery.ImEnabled
+        self.wait_until(lambda: self.view.focusProxy().inputMethodQuery(typing))
 
 
 @pytest.fixture
@@ -377,3 +383,62 @@ def test_the_terminal_knows_once_its_shell_has_written_something(harness):
     harness.wait_for("$")
 
     assert harness.view.has_output
+
+
+# Keyboard shortcuts while typing in the terminal
+
+
+def shortcut(harness, key):
+    """Give the terminal's window an action with this shortcut."""
+    action = QAction(harness.view)
+    action.setShortcut(to_key_sequence(key))
+    # The terminal is a window by itself here.
+    harness.view.addAction(action)
+    return action
+
+
+def wants(widget, key):
+    """Ask a widget whether it wants a key for itself.
+
+    Qt asks this of whatever has keyboard focus before it runs a shortcut, and
+    runs the shortcut only if the answer is no.
+    """
+    pressed = to_key_sequence(key)[0]
+    asking = QEvent.Type.ShortcutOverride
+    event = QKeyEvent(asking, pressed.key(), pressed.keyboardModifiers())
+    QApplication.sendEvent(widget, event)
+    return event.isAccepted()
+
+
+def test_a_shortcut_runs_though_its_key_means_something_to_a_web_page(
+    harness, wait_until
+):
+    ran = []
+    # To a web page that is editing text, this is the key for underline.
+    shortcut(harness, "cmd+u").triggered.connect(lambda: ran.append(True))
+    harness.view.activateWindow()
+    wait_until(harness.view.isActiveWindow)
+    harness.focus()
+
+    QTest.keySequence(harness.view.focusProxy(), to_key_sequence("cmd+u"))
+
+    assert ran == [True]
+
+
+def test_the_page_keeps_the_editing_keys_that_are_not_shortcuts(harness):
+    harness.focus()
+    page = harness.view.focusProxy()
+    # Copy and underline both mean something to a page that is editing text.
+    assert wants(page, "cmd+c")
+    assert wants(page, "cmd+u")
+
+    action = shortcut(harness, "cmd+u")
+    assert not wants(page, "cmd+u")
+    assert wants(page, "cmd+c")
+
+    # A key that only begins a shortcut is not the page's either.
+    action.setShortcut(to_key_sequence("cmd+u cmd+x"))
+    assert not wants(page, "cmd+u")
+
+    action.setShortcut(to_key_sequence("cmd+j"))
+    assert wants(page, "cmd+u")

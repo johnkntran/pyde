@@ -535,6 +535,32 @@ def test_toggling_the_terminal_moves_keyboard_focus_with_it(window, file, wait_u
     assert focused is terminal or terminal.isAncestorOf(focused)
 
 
+def test_keys_a_web_page_would_keep_still_run_commands_from_the_terminal(
+    window, wait_until
+):
+    show(window, wait_until)
+    wait_until(lambda: window.terminal_view.running, timeout=30)
+    window.terminal_view.focus_terminal()
+
+    def typing_in_the_page():
+        """Whether keyboard focus has reached the text field in the page."""
+        focused = window.focusWidget()
+        return focused and focused.inputMethodQuery(Qt.InputMethodQuery.ImEnabled)
+
+    wait_until(typing_in_the_page)
+    ran = []
+    for command_id in ("view.toggleFileTree", "view.collapseFolders"):
+        window.commands[command_id].action.triggered.connect(
+            lambda _checked=False, command_id=command_id: ran.append(command_id)
+        )
+
+    # To a web page that is editing text, these are bold and underline.
+    press(window.focusWidget(), "cmd+b")
+    press(window.focusWidget(), "cmd+u")
+
+    assert ran == ["view.toggleFileTree", "view.collapseFolders"]
+
+
 def test_opening_a_folder_points_the_terminal_at_it(window, tmp_path):
     folder = tmp_path / "project"
     folder.mkdir()
@@ -542,6 +568,19 @@ def test_opening_a_folder_points_the_terminal_at_it(window, tmp_path):
     window.open_folder(folder)
 
     assert window.terminal_view.folder == folder
+
+
+def test_a_window_closed_while_its_terminal_was_loading_gets_no_shell(
+    window, wait_until
+):
+    loaded = []
+    window.terminal_view.started.connect(lambda: loaded.append(True))
+    window.show()
+
+    window.close()
+    wait_until(lambda: loaded, timeout=30)
+
+    assert not window.terminal_view.running
 
 
 def test_closing_the_window_ends_the_terminals_shell(window, wait_until):
