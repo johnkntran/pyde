@@ -127,19 +127,25 @@ class Searcher(QObject):
     def _search(
         self, stop: threading.Event, folder: Path, pattern: re.Pattern[str]
     ) -> None:
-        """Do the search. Runs on its own thread."""
+        """Do the search. Runs on its own thread.
+
+        It checks that it has not been cancelled before it announces anything,
+        and not only to save work: a cancelled search may have outlived the
+        window it belonged to, and then there is nothing left to announce to.
+        """
         count = 0
         for relative_path in list_files(folder):
+            matches = find_in_file(folder / relative_path, pattern)
             if stop.is_set():
                 return
-            matches = find_in_file(folder / relative_path, pattern)
             matches = matches[: MAX_MATCHES - count]
             if matches:
                 count += len(matches)
                 self._was_found.emit(stop, relative_path, matches)
                 if count == MAX_MATCHES:
                     break
-        self._has_finished.emit(stop, count == MAX_MATCHES)
+        if not stop.is_set():
+            self._has_finished.emit(stop, count == MAX_MATCHES)
 
     def _pass_on(
         self, stop: threading.Event, relative_path: str, matches: list

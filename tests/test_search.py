@@ -1,7 +1,10 @@
 import subprocess
 import threading
+from types import SimpleNamespace
 
 import pytest
+import shiboken6
+from PySide6.QtCore import QObject
 from PySide6.QtTest import QTest
 
 from pyde import search
@@ -137,10 +140,21 @@ def test_a_match_far_along_a_long_line_is_shown_with_a_little_before_it(tmp_path
 
 
 class Harness:
-    """A searcher, and everything it has announced."""
+    """A searcher, everything it has announced, and the threads it has started."""
 
-    def __init__(self):
-        self.searcher = Searcher()
+    def __init__(self, monkeypatch, parent=None):
+        self.searcher = Searcher(parent)
+        # The searcher's threads, newest last, kept as it starts them. They
+        # cannot be picked out of all the threads running: on Windows, Python
+        # starts some of its own to read what Git prints.
+        self.threads = []
+
+        def thread(**arguments):
+            self.threads.append(threading.Thread(**arguments))
+            return self.threads[-1]
+
+        stand_in = SimpleNamespace(Thread=thread, Event=threading.Event)
+        monkeypatch.setattr(search, "threading", stand_in)
         # Each file's path with the numbers of its matching lines.
         self.found = []
         self.finished = []
@@ -153,29 +167,65 @@ class Harness:
 
     def search(self, folder, query, match_case=False):
         """Start a search, and return the thread that carries it out."""
-        before = set(threading.enumerate())
         self.searcher.start(folder, compile_query(query, match_case))
-        (thread,) = set(threading.enumerate()) - before
-        return thread
+        return self.threads[-1]
+
+
+class Examined:
+    """The files that searches read, and a way to stop a search in its tracks.
+
+    A test that depends on a search being part-way through holds it there,
+    rather than hoping to be quick enough to catch it.
+    """
+
+    def __init__(self, monkeypatch):
+        # Each file read, as (what was searched for, the file's name).
+        self.files = []
+        # Where searches are held, if anywhere: "listing" the folder's files,
+        # or "reading" one of them.
+        self._held_at = None
+        self._go = threading.Event()
+        # Set once a held search has got to where it is held.
+        self.waiting = threading.Event()
+        list_files, find_in_file = search.list_files, search.find_in_file
+
+        def listing(folder):
+            self._pause("listing")
+            return list_files(folder)
+
+        def reading(path, pattern):
+            self._pause("reading")
+            self.files.append((pattern.pattern, path.name))
+            return find_in_file(path, pattern)
+
+        monkeypatch.setattr(search, "list_files", listing)
+        monkeypatch.setattr(search, "find_in_file", reading)
+
+    def hold(self, at="reading"):
+        self._go.clear()
+        self._held_at = at
+
+    def release(self):
+        self._held_at = None
+        self._go.set()
+
+    def read_by(self, query):
+        return [name for searched_for, name in self.files if searched_for == query]
+
+    def _pause(self, stage):
+        if self._held_at == stage:
+            self.waiting.set()
+            self._go.wait(timeout=30)
 
 
 @pytest.fixture
 def examined(monkeypatch):
-    """The files that searches read, each as (what was searched for, its name)."""
-    examined = []
-    find_in_file = search.find_in_file
-
-    def recording(path, pattern):
-        examined.append((pattern.pattern, path.name))
-        return find_in_file(path, pattern)
-
-    monkeypatch.setattr(search, "find_in_file", recording)
-    return examined
+    return Examined(monkeypatch)
 
 
 @pytest.fixture
-def harness(qapp):
-    return Harness()
+def harness(qapp, monkeypatch):
+    return Harness(monkeypatch)
 
 
 def test_a_search_announces_each_file_with_matches_then_that_it_is_over(
@@ -219,21 +269,24 @@ def test_a_search_stops_at_the_limit_and_says_so(
     assert harness.found == [("a.txt", [1, 2]), ("b.txt", [1])]
     assert harness.finished == [True]
     # It does not read on once it has all it will show.
-    assert examined == [("needle", "a.txt"), ("needle", "b.txt")]
+    assert examined.files == [("needle", "a.txt"), ("needle", "b.txt")]
 
 
 def test_a_new_search_stops_the_one_still_going(harness, tmp_path, examined):
     for number in range(50):
         write(tmp_path, f"{number}.txt", "first second\n")
 
+    examined.hold()
     first = harness.search(tmp_path, "first")
     second = harness.search(tmp_path, "second")
+    examined.release()
     first.join(timeout=30)
     second.join(timeout=30)
 
     assert not first.is_alive() and not second.is_alive()
-    assert len([name for query, name in examined if query == "second"]) == 50
-    assert len([name for query, name in examined if query == "first"]) < 50
+    assert len(examined.read_by("second")) == 50
+    # The first had read one file at most when the second took its place.
+    assert len(examined.read_by("first")) <= 1
 
 
 def test_what_an_earlier_search_found_is_dropped_once_a_new_one_starts(
@@ -270,9 +323,45 @@ def test_a_cancelled_search_stops_reading_files(harness, tmp_path, examined):
     for number in range(50):
         write(tmp_path, f"{number}.txt", "needle\n")
 
+    examined.hold()
     thread = harness.search(tmp_path, "needle")
     harness.searcher.cancel()
+    examined.release()
     thread.join(timeout=30)
 
     assert not thread.is_alive()
-    assert len(examined) < 50
+    assert len(examined.files) <= 1
+
+
+@pytest.mark.parametrize(
+    ("files", "held_at"),
+    [
+        # Cancelled with a file half read, which has a match to announce.
+        (["notes.txt"], "reading"),
+        # Cancelled with no files to come, and only the end to announce.
+        ([], "listing"),
+    ],
+)
+def test_a_cancelled_search_announces_nothing_once_its_searcher_is_gone(
+    qapp, tmp_path, examined, monkeypatch, files, held_at
+):
+    # As when the window is closed during a search: the search is cancelled,
+    # and then the searcher goes with the window.
+    window = QObject()
+    harness = Harness(monkeypatch, parent=window)
+    errors = []
+    monkeypatch.setattr(threading, "excepthook", errors.append)
+    for name in files:
+        write(tmp_path, name, "needle\n")
+
+    examined.hold(at=held_at)
+    thread = harness.search(tmp_path, "needle")
+    assert examined.waiting.wait(timeout=30)
+    harness.searcher.cancel()
+    shiboken6.delete(window)
+    examined.release()
+    thread.join(timeout=30)
+
+    assert not thread.is_alive()
+    # Announcing anything now would fail, there being no searcher to do it.
+    assert errors == []
