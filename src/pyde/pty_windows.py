@@ -33,6 +33,8 @@ class PtySession(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._process: PtyProcess | None = None
+        # Set when the process is stopped, to tell its reading thread so.
+        self._stopped = threading.Event()
         # Cleared to hold the reading thread back while output is paused.
         self._reading = threading.Event()
         self._reading.set()
@@ -64,8 +66,11 @@ class PtySession(QObject):
             self.exited.emit(NOT_FOUND)
             return
         self._process = process
+        self._stopped = stopped = threading.Event()
         self._reading.set()
-        threading.Thread(target=self._read_all, args=(process,), daemon=True).start()
+        threading.Thread(
+            target=self._read_all, args=(process, stopped), daemon=True
+        ).start()
 
     def write(self, text: str) -> None:
         """Send text to the program, as if typed."""
@@ -90,22 +95,29 @@ class PtySession(QObject):
         """End the program."""
         process, self._process = self._process, None
         if process is not None:
+            self._stopped.set()
             # Let its reading thread run on to the end of the output.
             self._reading.set()
             process.terminate(force=True)
 
-    def _read_all(self, process: PtyProcess) -> None:
-        """Read the program's output until it ends. Runs on its own thread."""
+    def _read_all(self, process: PtyProcess, stopped: threading.Event) -> None:
+        """Read the program's output until it ends. Runs on its own thread.
+
+        Once the program has been stopped it goes on reading, to the end of
+        the output, but announces nothing: by then the session may be gone,
+        along with the window it belonged to.
+        """
         while True:
             self._reading.wait()
             try:
                 text = process.read(READ_SIZE)
             except (EOFError, OSError):
                 break
-            if text:
+            if text and not stopped.is_set():
                 self._was_read.emit(process, text)
         process.wait()
-        self._has_ended.emit(process)
+        if not stopped.is_set():
+            self._has_ended.emit(process)
 
     def _pass_on(self, process: PtyProcess, text: str) -> None:
         # Output still arriving from a program that was replaced is dropped.

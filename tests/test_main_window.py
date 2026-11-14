@@ -544,6 +544,19 @@ def test_opening_a_folder_points_the_terminal_at_it(window, tmp_path):
     assert window.terminal_view.folder == folder
 
 
+def test_a_window_closed_while_its_terminal_was_loading_gets_no_shell(
+    window, wait_until
+):
+    loaded = []
+    window.terminal_view.started.connect(lambda: loaded.append(True))
+    window.show()
+
+    window.close()
+    wait_until(lambda: loaded, timeout=30)
+
+    assert not window.terminal_view.running
+
+
 def test_closing_the_window_ends_the_terminals_shell(window, wait_until):
     show(window, wait_until)
     wait_until(lambda: window.terminal_view.running, timeout=30)

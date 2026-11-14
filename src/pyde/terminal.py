@@ -120,7 +120,8 @@ class TerminalView(QWebEngineView):
     as it does to put the terminal inside a dev container.
     """
 
-    # The page has loaded and a shell is running in it.
+    # The page has loaded, and a shell is running in it unless the terminal
+    # has been shut down.
     started = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -138,6 +139,8 @@ class TerminalView(QWebEngineView):
         self._size: tuple[int, int] | None = None
         # Whether anything running in the terminal has written to it yet.
         self.has_output = False
+        # Set by `shutdown`, after which nothing more is started.
+        self._shut_down = False
         # Characters sent to the page that it has not yet drawn.
         self._unacknowledged = 0
         # Output waiting to be sent to the page in one go.
@@ -205,7 +208,13 @@ class TerminalView(QWebEngineView):
         self._bridge.focus.emit()
 
     def shutdown(self) -> None:
-        """End the shell. Call before the window goes away."""
+        """End the shell, for good. Call before the window goes away.
+
+        Nothing is started after this. Otherwise a window closed while its
+        terminal's page was still loading would get a shell once it had, and
+        nothing would ever end that one.
+        """
+        self._shut_down = True
         self._session.stop()
 
     # Called by the page, through the bridge.
@@ -233,6 +242,8 @@ class TerminalView(QWebEngineView):
 
     def _start(self) -> None:
         """Start the task if there is one, and otherwise the shell."""
+        if self._shut_down:
+            return
         if self._size is None:
             # The page is still loading, and starts this when it is ready.
             return
