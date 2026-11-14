@@ -164,14 +164,16 @@ def test_saving_the_file_reapplies_it(harness, wait_until):
     assert harness.messages == ["Keyboard shortcuts reloaded"]
 
 
-def test_saving_by_replacing_the_file_keeps_being_noticed(harness, wait_until):
+def test_saving_by_replacing_the_file_keeps_being_noticed(
+    harness, wait_until, patiently
+):
     harness.load('{"demo.one": "cmd+7"}')
 
     # Many editors save by writing a new file and renaming it over the old one.
     for key in ("8", "9"):
         replacement = harness.path.with_suffix(".tmp")
         replacement.write_text(f'{{"demo.one": "cmd+{key}"}}')
-        os.replace(replacement, harness.path)
+        patiently(os.replace, replacement, harness.path)
         wait_until(lambda key=key: harness.shortcuts()["demo.one"] == f"Ctrl+{key}")
 
 
@@ -183,10 +185,10 @@ def test_a_file_created_later_is_picked_up(harness, wait_until):
     wait_until(lambda: harness.shortcuts()["demo.one"] == "Ctrl+9")
 
 
-def test_deleting_the_file_restores_the_defaults(harness, wait_until):
+def test_deleting_the_file_restores_the_defaults(harness, wait_until, patiently):
     harness.load('{"demo.one": "cmd+9"}')
 
-    harness.path.unlink()
+    patiently(harness.path.unlink)
 
     wait_until(lambda: harness.shortcuts()["demo.one"] == "Ctrl+1")
 
