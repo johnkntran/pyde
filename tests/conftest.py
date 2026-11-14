@@ -270,3 +270,26 @@ def project(tmp_path):
         )
     )
     return folder
+
+
+@pytest.fixture
+def patiently():
+    """Do something to a file, trying again while Windows refuses it.
+
+    Windows refuses to rename over a file, or to delete it, with "Access is
+    denied", while anything else has the file open, and something often does
+    for a moment after a file is written; its virus scanner, for one. Editors
+    cope by trying again, and so do the tests that save and delete files the
+    way editors do: `patiently(os.replace, new, old)`.
+    """
+
+    def patiently(operation, *args, attempts=100, pause=0.05):
+        for attempt in range(1, attempts + 1):
+            try:
+                return operation(*args)
+            except PermissionError:
+                if attempt == attempts:
+                    raise
+                time.sleep(pause)
+
+    return patiently
