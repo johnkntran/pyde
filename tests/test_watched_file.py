@@ -53,7 +53,7 @@ def test_a_file_created_later_announces_a_change(harness, wait_until):
     wait_until(lambda: harness.changes == 1)
 
 
-def test_a_file_replaced_by_another_keeps_being_watched(harness, wait_until):
+def test_a_file_replaced_by_another_keeps_being_watched(harness, wait_until, patiently):
     harness.path.write_text("0")
     harness.file.read()
 
@@ -61,16 +61,16 @@ def test_a_file_replaced_by_another_keeps_being_watched(harness, wait_until):
     for count in (1, 2):
         replacement = harness.path.with_suffix(".tmp")
         replacement.write_text(str(count))
-        os.replace(replacement, harness.path)
+        patiently(os.replace, replacement, harness.path)
         wait_until(lambda count=count: harness.changes == count)
         assert harness.file.read() == str(count)
 
 
-def test_deleting_the_file_announces_a_change(harness, wait_until):
+def test_deleting_the_file_announces_a_change(harness, wait_until, patiently):
     harness.path.write_text("first")
     harness.file.read()
 
-    harness.path.unlink()
+    patiently(harness.path.unlink)
 
     wait_until(lambda: harness.changes == 1)
     assert harness.file.read() is None
