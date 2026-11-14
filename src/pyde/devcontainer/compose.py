@@ -5,7 +5,9 @@ make sense of what Docker reports back.
 """
 
 import json
+import os
 import re
+import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -238,8 +240,12 @@ def stale_hooks_command(
 
 
 def host_command(command: Command) -> list[str]:
-    """Run a lifecycle command on this Mac."""
-    return ["/bin/sh", "-c", command] if isinstance(command, str) else list(command)
+    """Run a lifecycle command on this computer, outside any container."""
+    if not isinstance(command, str):
+        return list(command)
+    if sys.platform == "win32":
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", command]
+    return ["/bin/sh", "-c", command]
 
 
 def _exec(

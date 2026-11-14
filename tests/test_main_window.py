@@ -413,6 +413,41 @@ def test_the_file_tree_can_be_toggled(window, tmp_path, wait_until):
     assert not window.file_tree_dock.isVisible()
 
 
+def test_collapse_all_folders_closes_every_open_folder(window, tmp_path, wait_until):
+    (tmp_path / "outer" / "inner").mkdir(parents=True)
+    (tmp_path / "outer" / "inner" / "deep.txt").write_text("")
+    window.open_folder(tmp_path)
+    show(window, wait_until)
+    tree = window.file_tree
+
+    def folder(name, parent=None):
+        """The tree's entry for a folder, once the tree has loaded it."""
+        parent = parent or tree.rootIndex()
+        model = tree.model()
+        for row in range(model.rowCount(parent)):
+            if model.index(row, 0, parent).data() == name:
+                return model.index(row, 0, parent)
+        return None
+
+    wait_until(lambda: folder("outer"))
+    tree.expand(folder("outer"))
+    wait_until(lambda: folder("inner", folder("outer")))
+    tree.expand(folder("inner", folder("outer")))
+    assert tree.isExpanded(folder("outer"))
+    assert tree.isExpanded(folder("inner", folder("outer")))
+
+    press(window, "cmd+u")
+
+    assert not tree.isExpanded(folder("outer"))
+    assert not tree.isExpanded(folder("inner", folder("outer")))
+
+
+def test_collapse_all_folders_is_harmless_before_a_folder_is_open(window):
+    run(window, "view.collapseFolders")
+
+    assert window.statusBar().currentMessage() == ""
+
+
 def test_find_searches_the_current_file_and_escape_dismisses_it(
     window, file, wait_until
 ):

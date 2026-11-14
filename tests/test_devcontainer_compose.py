@@ -367,6 +367,16 @@ def test_the_stale_hooks_command_lists_each_once_only_hook_with_its_stamp(tmp_pa
     ]
 
 
-def test_a_host_command_is_a_shell_line_or_a_program_with_arguments():
-    assert compose.host_command("make setup") == ["/bin/sh", "-c", "make setup"]
+def test_a_host_command_is_a_shell_line_or_a_program_with_arguments(monkeypatch):
     assert compose.host_command(["make", "setup"]) == ["make", "setup"]
+
+    monkeypatch.setattr(compose.sys, "platform", "darwin")
+    assert compose.host_command("make setup") == ["/bin/sh", "-c", "make setup"]
+
+    monkeypatch.setattr(compose.sys, "platform", "win32")
+    monkeypatch.setenv("COMSPEC", "C:\\Windows\\cmd.exe")
+    assert compose.host_command("make setup") == [
+        "C:\\Windows\\cmd.exe",
+        "/c",
+        "make setup",
+    ]

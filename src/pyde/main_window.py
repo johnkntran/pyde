@@ -45,7 +45,11 @@ MODIFIED_MARK = " •"
 
 
 def default_config_dir() -> Path:
-    """Where the user's settings live: ~/Library/Application Support/Pyde."""
+    """Where the user's settings live.
+
+    That is ~/Library/Application Support/Pyde on macOS, and %APPDATA%\\Pyde
+    on Windows.
+    """
     location = QStandardPaths.StandardLocation.AppDataLocation
     return Path(QStandardPaths.writableLocation(location))
 
@@ -189,6 +193,12 @@ class MainWindow(QMainWindow):
         self._add_menu(
             "View",
             ("view.toggleFileTree", "Toggle File Tree", self.toggle_file_tree, "cmd+b"),
+            (
+                "view.collapseFolders",
+                "Collapse All Folders",
+                self.file_tree.collapseAll,
+                "cmd+u",
+            ),
             ("view.toggleTerminal", "Toggle Terminal", self.toggle_terminal, "ctrl+`"),
             ("view.nextTab", "Next Tab", self.next_tab, "ctrl+tab"),
             ("view.previousTab", "Previous Tab", self.previous_tab, "ctrl+shift+tab"),

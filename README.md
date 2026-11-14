@@ -1,8 +1,8 @@
 # Pyde - The code editor written in Python
 
 Pyde is a desktop code editor built with Python and Qt (PySide6), with syntax
-highlighting by Pygments and a built-in terminal. It targets macOS 14 or later
-on Apple Silicon.
+highlighting by Pygments and a built-in terminal. It is made for macOS 14 or
+later on Apple Silicon, and also builds for 64-bit Windows.
 
 ## Install
 
@@ -17,6 +17,21 @@ Security → Open Anyway, or clear the quarantine flag:
 ```sh
 xattr -dr com.apple.quarantine /Applications/Pyde.app
 ```
+
+### Windows
+
+Download the latest `.zip` from the same page, unzip it, and run `Pyde.exe`
+in the `Pyde` folder. It is not code-signed either, so Windows warns the first
+time: choose More info, then Run anyway.
+
+The Windows build is made and tested by automation only; nobody has yet used
+it by hand. What differs from macOS:
+
+- The terminal runs PowerShell, or the Command Prompt if there is none.
+- A shortcut written with `cmd` uses the Control key, so `cmd+p` is ctrl+p.
+  In the terminal those shortcuts go to Pyde, not to the shell.
+- Settings are kept in `%APPDATA%\Pyde`.
+- Dev containers are untested.
 
 ## Terminal
 
@@ -132,6 +147,9 @@ uv run ruff format      # format
 scripts/build_dmg.sh    # build dist/Pyde.app and dist/Pyde-<version>-arm64.dmg
 ```
 
+On Windows, `scripts\build_windows.ps1` builds `dist\Pyde` and
+`dist\Pyde-<version>-windows-x64.zip`.
+
 To check a packaged build without clicking through it, run
 `dist/Pyde.app/Contents/MacOS/Pyde --smoke-test`. It starts the app, waits for
 the embedded web engine to load a page, and exits with status 0 on success.
@@ -150,8 +168,9 @@ Create a new version tag, such as `v0.2.0`, in either of two ways:
   git push origin v0.2.0
   ```
 
-GitHub Actions then tests the code, builds the `.dmg`, and attaches it to the
-release a few minutes later.
+GitHub Actions then tests the code, builds the macOS `.dmg` and the Windows
+`.zip`, and attaches them to the release a few minutes later. If the Windows
+build fails, the release still gets the `.dmg`.
 
 The tag is the only place the version is set: `v0.2.0` builds Pyde 0.2.0. The
 version in `pyproject.toml` is a placeholder that development builds report.
