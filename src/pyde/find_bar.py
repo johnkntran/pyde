@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from pyde.editor import CodeEditor
 
 # Qt puts this character, not "\n", between the lines of a multi-line selection.
-_PARAGRAPH_SEPARATOR = " "
+PARAGRAPH_SEPARATOR = " "
 
 
 class FindBar(QWidget):
@@ -62,7 +62,7 @@ class FindBar(QWidget):
         if editor is None:
             return
         selected = editor.textCursor().selectedText()
-        if selected and _PARAGRAPH_SEPARATOR not in selected:
+        if selected and PARAGRAPH_SEPARATOR not in selected:
             self.find_field.setText(selected)
         self.show()
         self.find_field.setFocus()

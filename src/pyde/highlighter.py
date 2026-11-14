@@ -159,7 +159,7 @@ def _resumable_lexing() -> Iterator[None]:
         RegexLexer.get_tokens_unprocessed = original
 
 
-def _utf16_length(text: str) -> int:
+def utf16_length(text: str) -> int:
     """How long Qt considers a string, which counts UTF-16 units, not characters."""
     return len(text.encode("utf-16-le")) // 2
 
@@ -191,7 +191,7 @@ class SyntaxHighlighter(QSyntaxHighlighter):
                 lexer.__dict__.pop("_saved_state_stack", None)
             index = 0
             for token, value in lexer.get_tokens(text):
-                length = _utf16_length(value)
+                length = utf16_length(value)
                 self.setFormat(index, length, self._format(token))
                 index += length
             # Only lexers built on RegexLexer leave a stack behind. The rest

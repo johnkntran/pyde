@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
 
-from pyde.highlighter import SyntaxHighlighter, lexer_for
+from pyde.highlighter import SyntaxHighlighter, lexer_for, utf16_length
 
 INDENT_WIDTH = 4
 FONT_SIZE = 13
@@ -95,6 +95,24 @@ class CodeEditor(QPlainTextEdit):
         self.document().setModified(False)
         if renamed:
             self._highlight_for_path()
+
+    def select(self, line: int, column: int, length: int) -> None:
+        """Select part of a line, and scroll so that it shows.
+
+        The line is counted from 1, and the column from 0, in characters. If
+        the text has changed and no longer reaches that far, the nearest place
+        that exists is used.
+        """
+        block = self.document().findBlockByNumber(line - 1)
+        if not block.isValid():
+            block = self.document().lastBlock()
+        text = block.text()
+        cursor = QTextCursor(block)
+        cursor.setPosition(block.position() + utf16_length(text[:column]))
+        end = block.position() + utf16_length(text[: column + length])
+        cursor.setPosition(end, _KEEP_ANCHOR)
+        self.setTextCursor(cursor)
+        self.centerCursor()
 
     def _highlight_for_path(self) -> None:
         """Color the text as the language that the file's name implies."""

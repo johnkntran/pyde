@@ -216,3 +216,54 @@ def test_saving_under_a_new_name_recolors_for_the_new_type(
     # Swapping the colors in and out is not an edit.
     assert not editor.document().isModified()
     assert not editor.document().isUndoAvailable()
+
+
+# Selecting part of a line
+
+
+def test_select_picks_out_part_of_a_line(editor):
+    editor.setPlainText("first\nsecond needle\nthird")
+
+    editor.select(2, 7, 6)
+
+    assert editor.textCursor().selectedText() == "needle"
+    assert editor.textCursor().blockNumber() == 1
+
+
+def test_select_counts_characters_however_qt_stores_them(editor):
+    # Qt holds each of these faces as two units, and counts in units.
+    editor.setPlainText("😀😀 needle 😀")
+
+    editor.select(1, 3, 8)
+
+    assert editor.textCursor().selectedText() == "needle 😀"
+
+
+def test_select_settles_for_the_nearest_place_when_the_text_has_changed(editor):
+    editor.setPlainText("one\ntwo")
+
+    # A line past the end is taken as the last one.
+    editor.select(9, 0, 3)
+    assert editor.textCursor().selectedText() == "two"
+
+    # A selection that runs past the end of its line stops there.
+    editor.select(1, 2, 50)
+    assert editor.textCursor().selectedText() == "e"
+
+    editor.select(1, 40, 5)
+    assert not editor.textCursor().hasSelection()
+    assert editor.textCursor().position() == 3
+
+
+def test_select_scrolls_to_the_line(editor, wait_until):
+    editor.setPlainText("\n".join(f"line {number}" for number in range(1, 501)))
+    editor.resize(400, 300)
+    editor.show()
+    wait_until(lambda: editor.viewport().height() > 0)
+
+    editor.select(400, 0, 4)
+
+    # The line is brought to the middle, where there is context either side.
+    height = editor.viewport().height()
+    assert abs(editor.cursorRect().center().y() - height / 2) < height / 4
+    assert editor.textCursor().blockNumber() == 399
