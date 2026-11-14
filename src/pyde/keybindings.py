@@ -14,11 +14,12 @@ import json
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QKeySequence
 
 from pyde import jsonc
 from pyde.commands import CommandRegistry
+from pyde.watched_file import WatchedFile
 
 
 def modifiers_for(platform: str) -> dict[str, str]:
@@ -122,21 +123,12 @@ class Keybindings(QObject):
         super().__init__(parent)
         self.path = path
         self._registry = registry
-        # The file's text as of the last time it was applied; None if missing.
-        self._text: str | None = None
-
-        # Editors save in bursts, and some replace the file instead of writing
-        # to it, so wait for a quiet moment before reading it.
-        self._change_timer = QTimer(self, singleShot=True, interval=100)
-        self._change_timer.timeout.connect(self._on_change)
-        self._watcher = QFileSystemWatcher(self)
-        self._watcher.fileChanged.connect(lambda _path: self._change_timer.start())
-        self._watcher.directoryChanged.connect(lambda _path: self._change_timer.start())
+        self._file = WatchedFile(path, self)
+        self._file.changed.connect(self._reload)
 
     def load(self) -> None:
         """Apply the file, or the defaults if it does not exist, and watch it."""
-        self._watch()
-        self._apply(self._read())
+        self._apply(self._file.read())
 
     def ensure_user_file(self) -> Path:
         """Create the keybindings file from a template if it does not exist."""
@@ -160,30 +152,12 @@ class Keybindings(QObject):
         )
         return path
 
-    def _watch(self) -> None:
-        # The folder is watched as well as the file, because an editor that
-        # saves by replacing the file leaves the old watch pointing at nothing.
-        watched = self._watcher.files() + self._watcher.directories()
-        for target in (self.path, self.path.parent):
-            if target.exists() and str(target) not in watched:
-                self._watcher.addPath(str(target))
-
-    def _read(self) -> str | None:
-        try:
-            return self.path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-
-    def _on_change(self) -> None:
-        self._watch()
-        text = self._read()
-        # The folder also changes when other files in it do.
-        if text != self._text and self._apply(text):
+    def _reload(self) -> None:
+        if self._apply(self._file.read()):
             self.message.emit("Keyboard shortcuts reloaded")
 
     def _apply(self, text: str | None) -> bool:
         """Set every command's shortcut. Returns whether the file was problem-free."""
-        self._text = text
         try:
             overrides = jsonc.loads(text) if text is not None else {}
             if not isinstance(overrides, dict):

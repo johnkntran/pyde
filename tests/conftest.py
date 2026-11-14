@@ -38,6 +38,15 @@ def no_unexpected_dialogs(monkeypatch):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", unexpected)
 
 
+@pytest.fixture(autouse=True)
+def default_styles():
+    """Put the highlighting styles back as Pyde ships them after each test."""
+    yield
+    from pyde import highlighter
+
+    highlighter.styles.set(highlighter.LIGHT_STYLE, highlighter.DARK_STYLE)
+
+
 @pytest.fixture
 def window(qapp, tmp_path):
     """A main window whose settings live in a temporary folder."""
