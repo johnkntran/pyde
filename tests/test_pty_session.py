@@ -1,11 +1,17 @@
 import os
+import sys
 
 import pytest
 from PySide6.QtTest import QTest
 
 from pyde.pty_session import PtySession
 
-ENV = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin", "TERM": "xterm-256color"}
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="drives a Unix shell on a Unix pseudo-terminal"
+)
+
+HOME = os.environ.get("HOME", "")
+ENV = {"HOME": HOME, "PATH": "/usr/bin:/bin", "TERM": "xterm-256color"}
 SHELL = ["/bin/sh", "-l"]
 
 

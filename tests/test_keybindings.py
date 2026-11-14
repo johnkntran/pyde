@@ -5,11 +5,18 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
-from pyde import jsonc
+from pyde import jsonc, keybindings
 from pyde.commands import CommandRegistry
-from pyde.keybindings import Keybindings, to_key_sequence
+from pyde.keybindings import Keybindings, modifiers_for, to_key_sequence
 
 PORTABLE = QKeySequence.SequenceFormat.PortableText
+NATIVE = QKeySequence.SequenceFormat.NativeText
+
+
+@pytest.fixture(autouse=True)
+def mac_modifiers(monkeypatch):
+    """Read keys the way a Mac does, whatever system the tests run on."""
+    monkeypatch.setattr(keybindings, "_MODIFIERS", modifiers_for("darwin"))
 
 
 @pytest.mark.parametrize(
@@ -39,6 +46,16 @@ def test_keys_translate_to_qt_sequences(qapp, key, qt_spelling):
 def test_invalid_keys_are_rejected(qapp, key):
     with pytest.raises(ValueError):
         to_key_sequence(key)
+
+
+def test_without_a_command_key_both_names_mean_control(qapp, monkeypatch):
+    assert modifiers_for("darwin")["ctrl"] == "Meta"
+    assert modifiers_for("win32")["ctrl"] == "Ctrl"
+    monkeypatch.setattr(keybindings, "_MODIFIERS", modifiers_for("win32"))
+
+    assert to_key_sequence("cmd+p").toString(PORTABLE) == "Ctrl+P"
+    assert to_key_sequence("ctrl+`").toString(PORTABLE) == "Ctrl+`"
+    assert to_key_sequence("cmd+k cmd+s").toString(PORTABLE) == "Ctrl+K, Ctrl+S"
 
 
 class Harness:
@@ -120,8 +137,10 @@ def test_an_invalid_key_is_reported_and_the_default_is_kept(harness, value):
 def test_a_key_shared_by_two_commands_is_reported(harness):
     harness.load('{"demo.two": "cmd+1"}')
 
+    # Shown the way this system writes keys: ⌘1 on a Mac.
+    key = QKeySequence("Ctrl+1").toString(NATIVE)
     assert harness.messages == [
-        "keybindings.json: ⌘1 is bound to both demo.one and demo.two"
+        f"keybindings.json: {key} is bound to both demo.one and demo.two"
     ]
 
 
@@ -145,14 +164,16 @@ def test_saving_the_file_reapplies_it(harness, wait_until):
     assert harness.messages == ["Keyboard shortcuts reloaded"]
 
 
-def test_saving_by_replacing_the_file_keeps_being_noticed(harness, wait_until):
+def test_saving_by_replacing_the_file_keeps_being_noticed(
+    harness, wait_until, patiently
+):
     harness.load('{"demo.one": "cmd+7"}')
 
     # Many editors save by writing a new file and renaming it over the old one.
     for key in ("8", "9"):
         replacement = harness.path.with_suffix(".tmp")
         replacement.write_text(f'{{"demo.one": "cmd+{key}"}}')
-        os.replace(replacement, harness.path)
+        patiently(os.replace, replacement, harness.path)
         wait_until(lambda key=key: harness.shortcuts()["demo.one"] == f"Ctrl+{key}")
 
 
@@ -164,10 +185,10 @@ def test_a_file_created_later_is_picked_up(harness, wait_until):
     wait_until(lambda: harness.shortcuts()["demo.one"] == "Ctrl+9")
 
 
-def test_deleting_the_file_restores_the_defaults(harness, wait_until):
+def test_deleting_the_file_restores_the_defaults(harness, wait_until, patiently):
     harness.load('{"demo.one": "cmd+9"}')
 
-    harness.path.unlink()
+    patiently(harness.path.unlink)
 
     wait_until(lambda: harness.shortcuts()["demo.one"] == "Ctrl+1")
 

@@ -8,6 +8,7 @@ where Docker is not running, as on GitHub's macOS runners.
 import json
 import shutil
 import subprocess
+import sys
 import uuid
 
 import pytest
@@ -45,7 +46,8 @@ def docker_is_running():
 
 
 pytestmark = pytest.mark.skipif(
-    not docker_is_running(), reason="needs a running Docker"
+    sys.platform == "win32" or not docker_is_running(),
+    reason="needs a running Docker that runs Linux containers",
 )
 
 

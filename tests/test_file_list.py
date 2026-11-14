@@ -75,3 +75,9 @@ def test_a_walk_stops_at_the_file_limit(tmp_path, monkeypatch):
     write(tmp_path, *(f"folder{n}/file.txt" for n in range(10)))
 
     assert len(list_files(tmp_path)) == 3
+
+
+def test_walked_paths_use_forward_slashes_like_gits(tmp_path):
+    write(tmp_path, "pkg/sub/module.py")
+
+    assert list_files(tmp_path) == ["pkg/sub/module.py"]

@@ -54,7 +54,7 @@ const THEMES = {
 };
 
 const terminal = new Terminal({
-  fontFamily: "Menlo, Monaco, monospace",
+  fontFamily: 'Menlo, Monaco, "Cascadia Mono", Consolas, monospace',
   fontSize: 13,
   cursorBlink: true,
   scrollback: 10000,
