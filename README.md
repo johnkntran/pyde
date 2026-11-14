@@ -2,7 +2,7 @@
 
 Pyde is a desktop code editor built with Python and Qt (PySide6), with syntax
 highlighting by Pygments and a built-in terminal. It is made for macOS 14 or
-later on Apple Silicon, and also builds for 64-bit Windows.
+later on Apple Silicon, and for 64-bit Windows.
 
 ## Install
 
@@ -24,8 +24,7 @@ Download the latest `.zip` from the same page, unzip it, and run `Pyde.exe`
 in the `Pyde` folder. It is not code-signed either, so Windows warns the first
 time: choose More info, then Run anyway.
 
-The Windows build is made and tested by automation only; nobody has yet used
-it by hand. What differs from macOS:
+What differs from macOS:
 
 - The terminal runs PowerShell, or the Command Prompt if there is none.
 - A shortcut written with `cmd` uses the Control key, so `cmd+p` is ctrl+p.
