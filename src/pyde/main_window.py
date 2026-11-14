@@ -172,6 +172,12 @@ class MainWindow(QMainWindow):
         self._add_menu(
             "View",
             ("view.toggleFileTree", "Toggle File Tree", self.toggle_file_tree, "cmd+b"),
+            (
+                "view.collapseFolders",
+                "Collapse All Folders",
+                self.file_tree.collapseAll,
+                "cmd+u",
+            ),
             ("view.toggleTerminal", "Toggle Terminal", self.toggle_terminal, "ctrl+`"),
             ("view.nextTab", "Next Tab", self.next_tab, "ctrl+tab"),
             ("view.previousTab", "Previous Tab", self.previous_tab, "ctrl+shift+tab"),
