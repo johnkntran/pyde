@@ -6,8 +6,19 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QLocale, QObject, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import (
+    QChildEvent,
+    QEvent,
+    QKeyCombination,
+    QLocale,
+    QObject,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import QGuiApplication, QKeySequence
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QWidget
@@ -216,6 +227,42 @@ class TerminalView(QWebEngineView):
         """
         self._shut_down = True
         self._session.stop()
+
+    # Keeping the window's keyboard shortcuts working while typing here.
+
+    def childEvent(self, event: QChildEvent) -> None:
+        """Watch the events of the widget the page is shown in.
+
+        The web view makes that widget itself, and it is the one with keyboard
+        focus while the terminal is typed into.
+        """
+        if event.added() and event.child().isWidgetType():
+            event.child().installEventFilter(self)
+        super().childEvent(event)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Stop the page keeping a key that is one of the window's shortcuts.
+
+        Before running a shortcut, Qt asks whatever has keyboard focus whether
+        it wants the key for itself. A web page that is editing text says yes
+        to the keys for bold, italic, underline and the like, and the terminal
+        counts as editing text, though those mean nothing in it. So the page
+        is not asked about a key that is a shortcut.
+        """
+        if event.type() == QEvent.Type.ShortcutOverride:
+            if self._is_shortcut(event.keyCombination()):
+                event.ignore()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _is_shortcut(self, key: QKeyCombination) -> bool:
+        """Whether a key is, or begins, the shortcut of one of the window's actions."""
+        pressed = QKeySequence(key)
+        no_match = QKeySequence.SequenceMatch.NoMatch
+        return any(
+            pressed.matches(action.shortcut()) != no_match
+            for action in self.window().actions()
+        )
 
     # Called by the page, through the bridge.
 
