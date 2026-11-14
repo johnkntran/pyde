@@ -40,6 +40,19 @@ and return to your file. It runs your login shell, so the tools on your usual
 path are available, and it starts in the folder you have open. Opening another
 folder restarts the shell there.
 
+## Previews
+
+Markdown files (`.md`, `.markdown`) and files of comma- or tab-separated
+values (`.csv`, `.tsv`) have a read-only preview. Choose **Preview** from the
+picker at the right of the tab bar, or press `cmd+shift+v`, to see Markdown
+formatted, or the values as a table. Choose **Raw** to get the text back and
+edit it; Find does that for you.
+
+- The preview shows the text as it is in the editor, saved or not.
+- A table takes its column headings from the file's first row.
+- A `.csv` file is split on commas only, so one that uses semicolons shows as
+  a single column.
+
 ## Dev containers
 
 When the folder you open has a `.devcontainer/devcontainer.json` (or a
