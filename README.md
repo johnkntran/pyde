@@ -40,6 +40,23 @@ and return to your file. It runs your login shell, so the tools on your usual
 path are available, and it starts in the folder you have open. Opening another
 folder restarts the shell there.
 
+## Find in Files
+
+Press `cmd+shift+f` to search every file in the folder you have open. The
+search is a tab beside the terminal, in the panel along the bottom. Type what
+to find and press Return, and each line that matches is listed under its file.
+
+- Double-click a result, or press Return on it, to open the file with the text
+  selected. The down arrow moves from the field into the results, and Escape
+  returns to your file.
+- The text is found as written, not as a pattern. Its case is ignored unless
+  you tick **Match Case**.
+- In a Git repository, the files Git ignores are not searched. Nor are files
+  that are not UTF-8 text, which Pyde could not open either.
+- Files are searched as they were last saved, so save to find what you have
+  just typed.
+- A search stops once it has found 5,000 lines.
+
 ## Previews
 
 Markdown files (`.md`, `.markdown`) and files of comma- or tab-separated

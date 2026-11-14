@@ -52,12 +52,22 @@ def test_a_new_window_has_no_folder_tabs_or_problems(window):
     assert window.statusBar().currentMessage() == ""
 
 
-def test_the_terminal_dock_hosts_a_web_view_at_the_bottom(window):
-    assert isinstance(window.terminal_dock.widget(), QWebEngineView)
+def test_the_panel_at_the_bottom_has_tabs_for_the_terminal_and_the_search(window):
+    panel = window.panel
+
+    assert window.panel_dock.widget() is panel
     assert (
-        window.dockWidgetArea(window.terminal_dock)
+        window.dockWidgetArea(window.panel_dock)
         == Qt.DockWidgetArea.BottomDockWidgetArea
     )
+    assert [panel.tabText(index) for index in range(panel.count())] == [
+        "Terminal",
+        "Search",
+    ]
+    assert isinstance(panel.widget(0), QWebEngineView)
+    assert panel.widget(1) is window.search_panel
+    # The terminal is the one in front to begin with.
+    assert panel.currentWidget() is window.terminal_view
 
 
 def test_every_default_key_is_valid(window):
@@ -71,13 +81,13 @@ def test_every_default_key_is_valid(window):
 
 def test_pressing_the_default_key_toggles_the_terminal(window, wait_until):
     show(window, wait_until)
-    assert window.terminal_dock.isVisible()
+    assert window.panel_dock.isVisible()
 
     press(window, "ctrl+`")
-    assert not window.terminal_dock.isVisible()
+    assert not window.panel_dock.isVisible()
 
     press(window, "ctrl+`")
-    assert window.terminal_dock.isVisible()
+    assert window.panel_dock.isVisible()
 
 
 def test_the_terminal_key_works_while_the_web_view_has_focus(window, wait_until):
@@ -87,7 +97,7 @@ def test_the_terminal_key_works_while_the_web_view_has_focus(window, wait_until)
 
     press(window.focusWidget(), "ctrl+`")
 
-    assert not window.terminal_dock.isVisible()
+    assert not window.panel_dock.isVisible()
 
 
 def test_the_keybindings_file_rebinds_a_command(qapp, tmp_path, wait_until):
@@ -96,10 +106,10 @@ def test_the_keybindings_file_rebinds_a_command(qapp, tmp_path, wait_until):
     show(window, wait_until)
 
     press(window, "ctrl+`")
-    assert window.terminal_dock.isVisible()
+    assert window.panel_dock.isVisible()
 
     press(window, "cmd+j")
-    assert not window.terminal_dock.isVisible()
+    assert not window.panel_dock.isVisible()
 
     window.close()
 
@@ -516,11 +526,11 @@ def test_toggling_the_terminal_moves_keyboard_focus_with_it(window, file, wait_u
     terminal = window.terminal_view
 
     press(window, "ctrl+`")
-    assert not window.terminal_dock.isVisible()
+    assert not window.panel_dock.isVisible()
     assert editor.hasFocus()
 
     press(window, "ctrl+`")
-    assert window.terminal_dock.isVisible()
+    assert window.panel_dock.isVisible()
     focused = window.focusWidget()
     assert focused is terminal or terminal.isAncestorOf(focused)
 
@@ -946,3 +956,221 @@ def test_the_previewed_file_can_be_saved_and_closed(window, readme):
 
     assert readme.read_text().endswith("more")
     assert window.tabs.count() == 0
+
+
+# Find in Files
+
+
+@pytest.fixture
+def haystack(tmp_path):
+    """A folder with a needle in two of its files."""
+    folder = tmp_path / "haystack"
+    folder.mkdir()
+    (folder / "notes.txt").write_text("one\ntwo needle\n")
+    (folder / "README.md").write_text("# Title\n\nA **needle** here\n")
+    (folder / "empty.txt").write_text("nothing\n")
+    return folder
+
+
+def search_for(window, wait_until, query):
+    """Search the open folder, and return the rows of results by file name."""
+    panel = window.search_panel
+    panel.field.setText(query)
+    panel.search()
+    wait_until(lambda: not panel.searching)
+    files = [
+        panel.results.topLevelItem(row)
+        for row in range(panel.results.topLevelItemCount())
+    ]
+    return {
+        file.text(0): [file.child(row) for row in range(file.childCount())]
+        for file in files
+    }
+
+
+def choose_result(window, row):
+    window.search_panel.results.itemDoubleClicked.emit(row, 0)
+
+
+def test_find_in_files_shows_the_search_ready_to_type(window, haystack, wait_until):
+    window.open_folder(haystack)
+    show(window, wait_until)
+    press(window, "ctrl+`")
+    assert not window.panel_dock.isVisible()
+
+    press(window, "cmd+shift+f")
+
+    assert window.panel_dock.isVisible()
+    assert window.panel.currentWidget() is window.search_panel
+    assert window.search_panel.field.hasFocus()
+
+
+def test_find_in_files_starts_from_the_selected_text(window, haystack):
+    window.open_folder(haystack)
+    window.open_file(haystack / "notes.txt").select(2, 4, 6)
+
+    run(window, "edit.findInFiles")
+
+    assert window.search_panel.field.text() == "needle"
+    assert window.search_panel.field.selectedText() == "needle"
+
+
+def test_find_in_files_keeps_its_text_when_whole_lines_are_selected(window, haystack):
+    window.open_folder(haystack)
+    window.open_file(haystack / "notes.txt").selectAll()
+    window.search_panel.field.setText("before")
+
+    run(window, "edit.findInFiles")
+
+    assert window.search_panel.field.text() == "before"
+
+
+def test_find_in_files_needs_an_open_folder(window):
+    run(window, "edit.findInFiles")
+
+    assert window.statusBar().currentMessage() == "Open a folder to use Find in Files"
+    assert window.panel.currentWidget() is window.terminal_view
+
+
+def test_the_terminal_key_brings_the_terminal_in_front_of_the_search(
+    window, haystack, wait_until
+):
+    window.open_folder(haystack)
+    show(window, wait_until)
+    terminal = window.terminal_view
+    run(window, "edit.findInFiles")
+
+    press(window, "ctrl+`")
+    assert window.panel_dock.isVisible()
+    assert window.panel.currentWidget() is terminal
+    focused = window.focusWidget()
+    assert focused is terminal or terminal.isAncestorOf(focused)
+
+    press(window, "ctrl+`")
+    assert not window.panel_dock.isVisible()
+
+
+def test_choosing_a_search_result_opens_the_file_with_the_text_selected(
+    window, haystack, wait_until
+):
+    window.open_folder(haystack)
+    show(window, wait_until)
+    results = search_for(window, wait_until, "needle")
+    assert sorted(results) == ["README.md", "notes.txt"]
+
+    choose_result(window, results["notes.txt"][0])
+
+    editor = window.current_editor()
+    assert editor.path == haystack / "notes.txt"
+    assert editor.textCursor().selectedText() == "needle"
+    assert editor.textCursor().blockNumber() == 1
+    assert editor.hasFocus()
+
+
+def test_a_search_result_in_a_file_already_open_returns_to_its_tab(
+    window, haystack, wait_until
+):
+    window.open_folder(haystack)
+    notes = window.open_file(haystack / "notes.txt")
+    window.open_file(haystack / "empty.txt")
+    show(window, wait_until)
+    results = search_for(window, wait_until, "needle")
+    # Keyboard focus is in the search, as it is when a result is chosen.
+    run(window, "edit.findInFiles")
+    assert window.search_panel.field.hasFocus()
+
+    choose_result(window, results["notes.txt"][0])
+
+    assert tab_titles(window) == ["notes.txt", "empty.txt"]
+    assert window.current_editor() is notes
+    assert notes.hasFocus()
+
+
+def test_a_search_result_in_a_previewed_file_shows_its_text(
+    window, haystack, wait_until
+):
+    window.open_folder(haystack)
+    window.open_file(haystack / "README.md")
+    window.set_previewing(True)
+    results = search_for(window, wait_until, "needle")
+
+    choose_result(window, results["README.md"][0])
+
+    assert not window.current_view().previewing
+    assert window.current_editor().textCursor().selectedText() == "needle"
+
+
+def test_a_search_result_whose_file_has_gone_is_reported(
+    window, haystack, wait_until, patiently
+):
+    window.open_folder(haystack)
+    results = search_for(window, wait_until, "needle")
+    patiently((haystack / "notes.txt").unlink)
+
+    choose_result(window, results["notes.txt"][0])
+
+    assert tab_titles(window) == []
+    assert window.statusBar().currentMessage().startswith("Cannot open notes.txt")
+
+
+def test_escape_in_the_search_returns_to_the_file(window, haystack, wait_until):
+    window.open_folder(haystack)
+    editor = window.open_file(haystack / "notes.txt")
+    show(window, wait_until)
+    run(window, "edit.findInFiles")
+    assert not editor.hasFocus()
+
+    QTest.keyClick(window.search_panel.field, Qt.Key.Key_Escape)
+
+    assert editor.hasFocus()
+    # The results stay where they can be read.
+    assert window.panel_dock.isVisible()
+
+
+def test_the_button_beside_the_tabs_hides_the_panel_and_returns_to_the_file(
+    window, haystack, wait_until
+):
+    window.open_folder(haystack)
+    editor = window.open_file(haystack / "notes.txt")
+    show(window, wait_until)
+    run(window, "edit.findInFiles")
+    assert not editor.hasFocus()
+
+    window.panel.cornerWidget().click()
+
+    assert not window.panel_dock.isVisible()
+    assert editor.hasFocus()
+
+
+def test_opening_another_folder_drops_the_search_results(
+    window, haystack, tmp_path, wait_until
+):
+    window.open_folder(haystack)
+    assert search_for(window, wait_until, "needle")
+
+    window.open_folder(tmp_path)
+
+    assert window.search_panel.results.topLevelItemCount() == 0
+
+
+def test_starting_a_dev_container_brings_the_terminal_to_the_front(
+    window, project, fake_docker, wait_until
+):
+    window.open_folder(project)
+    run(window, "edit.findInFiles")
+    assert window.panel.currentWidget() is window.search_panel
+
+    connect(window, wait_until)
+
+    assert window.panel.currentWidget() is window.terminal_view
+
+
+def test_closing_the_window_stops_a_search(window, haystack):
+    window.open_folder(haystack)
+    window.search_panel.field.setText("needle")
+    window.search_panel.search()
+    assert window.search_panel.searching
+
+    window.close()
+
+    assert not window.search_panel.searching

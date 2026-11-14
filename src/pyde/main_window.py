@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QStackedWidget,
+    QStyle,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -31,11 +33,12 @@ from pyde.devcontainer.controller import DevContainer
 from pyde.editor import CodeEditor
 from pyde.file_list import list_files
 from pyde.file_tree import FileTree
-from pyde.find_bar import FindBar
+from pyde.find_bar import PARAGRAPH_SEPARATOR, FindBar
 from pyde.keybindings import Keybindings
 from pyde.notice_bar import NoticeBar
 from pyde.palette import Palette
 from pyde.preview import FileView
+from pyde.search_panel import SearchPanel
 from pyde.settings import Settings
 from pyde.terminal import TerminalView
 
@@ -112,20 +115,34 @@ class MainWindow(QMainWindow):
         # There is nothing to show until a folder is opened.
         self.file_tree_dock.hide()
 
+        # Along the bottom, a panel with a tab each for the terminal and for
+        # searching the folder's files.
         self.terminal_view = TerminalView()
-        self.terminal_dock = self._add_dock(
-            "Terminal",
-            "terminal",
-            self.terminal_view,
-            Qt.DockWidgetArea.BottomDockWidgetArea,
+        self.search_panel = SearchPanel()
+        self.search_panel.match_activated.connect(self._open_match)
+        self.search_panel.dismissed.connect(self._focus_file)
+        self.panel = QTabWidget(documentMode=True)
+        self.panel.addTab(self.terminal_view, "Terminal")
+        self.panel.addTab(self.search_panel, "Search")
+        self.panel_dock = self._add_dock(
+            "Panel", "panel", self.panel, Qt.DockWidgetArea.BottomDockWidgetArea
         )
+        # The tabs say what the panel is showing, so they stand in for its
+        # title bar, with the button that hides it at their far end.
+        self.panel_dock.setTitleBarWidget(QWidget())
+        hide_panel = QToolButton(autoRaise=True, toolTip="Hide Panel")
+        hide_panel.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarCloseButton)
+        )
+        hide_panel.clicked.connect(self._hide_panel)
+        self.panel.setCornerWidget(hide_panel)
 
-        # The file tree runs the full height of the window, with the terminal
+        # The file tree runs the full height of the window, with the panel
         # beside it rather than underneath.
         self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
         self.resizeDocks([self.file_tree_dock], [240], Qt.Orientation.Horizontal)
         # Without this the web view's size hint claims most of the window.
-        self.resizeDocks([self.terminal_dock], [260], Qt.Orientation.Vertical)
+        self.resizeDocks([self.panel_dock], [260], Qt.Orientation.Vertical)
 
         # Floats over the top of the window while it is open.
         self.palette = Palette(self)
@@ -189,6 +206,7 @@ class MainWindow(QMainWindow):
                 self._in_raw(find.find_previous),
                 "cmd+shift+g",
             ),
+            ("edit.findInFiles", "Find in Files", self.find_in_files, "cmd+shift+f"),
         )
         self._add_menu(
             "View",
@@ -268,6 +286,7 @@ class MainWindow(QMainWindow):
         self.folder = folder.resolve()
         self.file_tree.set_folder(self.folder)
         self.terminal_view.set_folder(self.folder)
+        self.search_panel.set_folder(self.folder)
         self.file_tree_dock.show()
         self._update_title()
         self._offer_container()
@@ -317,6 +336,31 @@ class MainWindow(QMainWindow):
             lambda relative_path: self.open_file(folder / relative_path),
             placeholder="Go to file",
         )
+
+    def find_in_files(self) -> None:
+        """Show the search of the folder's files, ready to type what to find.
+
+        As with Find, it starts from the text selected in the current file.
+        """
+        if self.folder is None:
+            self._report("Open a folder to use Find in Files")
+            return
+        editor = self.current_editor()
+        selected = editor.textCursor().selectedText() if editor else ""
+        self._show_panel(self.search_panel)
+        self.search_panel.start_typing(
+            "" if PARAGRAPH_SEPARATOR in selected else selected
+        )
+
+    def _open_match(self, path: Path, line: int, column: int, length: int) -> None:
+        """Show a search result: its file, with the text that was found selected."""
+        editor = self.open_file(path)
+        if editor is None:
+            return
+        if self.current_view().previewing:
+            self.set_previewing(False)
+        editor.select(line, column, length)
+        editor.setFocus()
 
     def open_settings(self) -> None:
         self.open_file(self.settings.ensure_user_file())
@@ -370,6 +414,7 @@ class MainWindow(QMainWindow):
         if all(self._may_close(editor) for editor in self.editors()):
             self._leave_container(quitting=True)
             self.terminal_view.shutdown()
+            self.search_panel.shutdown()
             event.accept()
         else:
             event.ignore()
@@ -472,15 +517,32 @@ class MainWindow(QMainWindow):
         self.file_tree_dock.setVisible(not self.file_tree_dock.isVisible())
 
     def toggle_terminal(self) -> None:
-        """Show the terminal and type into it, or hide it and return to the file."""
-        if self.terminal_dock.isVisible():
-            self.terminal_dock.hide()
-            view = self.current_view()
-            if view is not None:
-                view.currentWidget().setFocus()
+        """Show the terminal and type into it, or hide it and return to the file.
+
+        If the panel is showing its other tab, the terminal comes to the front.
+        """
+        showing = self.panel.currentWidget() is self.terminal_view
+        if self.panel_dock.isVisible() and showing:
+            self._hide_panel()
         else:
-            self.terminal_dock.show()
+            self._show_panel(self.terminal_view)
             self.terminal_view.focus_terminal()
+
+    def _show_panel(self, tab: QWidget) -> None:
+        """Show the panel along the bottom, with this one of its tabs in front."""
+        self.panel.setCurrentWidget(tab)
+        self.panel_dock.show()
+
+    def _hide_panel(self) -> None:
+        """Hide the panel along the bottom, and return to the file."""
+        self.panel_dock.hide()
+        self._focus_file()
+
+    def _focus_file(self) -> None:
+        """Put keyboard focus back in the current file, if there is one."""
+        view = self.current_view()
+        if view is not None:
+            view.currentWidget().setFocus()
 
     def _report(self, text: str) -> None:
         self.statusBar().showMessage(text, STATUS_MESSAGE_MS)
@@ -517,7 +579,8 @@ class MainWindow(QMainWindow):
         self.dev_container.failed.connect(self._container_failed)
         self.dev_container.warned.connect(self.notice_bar.show_notice)
         self.notice_bar.show_notice("Starting the dev container…")
-        self.terminal_dock.show()
+        # Where the bring-up can be watched.
+        self._show_panel(self.terminal_view)
         self.dev_container.start(rebuild)
 
     def rebuild_container(self) -> None:
