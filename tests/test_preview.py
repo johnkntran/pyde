@@ -1,5 +1,7 @@
+from pathlib import Path
+
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QFont, QTextCursor, QTextFormat
 
 from pyde.editor import CodeEditor
@@ -112,8 +114,9 @@ def test_relative_links_are_relative_to_the_files_folder(qapp, tmp_path):
 
     preview.show_text("[other](docs/other.md)", tmp_path / "README.md")
 
-    base = preview.document().baseUrl().toLocalFile()
-    assert base == f"{tmp_path}/"
+    # Compared as paths: Qt writes a Windows path with forward slashes.
+    link = preview.document().baseUrl().resolved(QUrl("docs/other.md"))
+    assert Path(link.toLocalFile()) == tmp_path / "docs" / "other.md"
 
 
 # Tables
