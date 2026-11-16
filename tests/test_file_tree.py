@@ -1,4 +1,6 @@
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 
 from pyde.file_tree import FileTree
 
@@ -61,6 +63,54 @@ def test_activating_a_file_announces_its_path(tree, tmp_path, wait_until):
     folder, file = rows(tree)
     tree.activated.emit(folder)
     tree.activated.emit(file)
+
+    assert activated == [tmp_path / "file.txt"]
+
+
+@pytest.fixture
+def shown(tree, tmp_path, wait_until):
+    """The tree on screen, showing a folder and a file, ready to be clicked."""
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "file.txt").write_text("")
+    tree.set_folder(tmp_path)
+    tree.resize(300, 200)
+    tree.show()
+    wait_until(lambda: names(tree) == ["folder", "file.txt"])
+    wait_until(
+        lambda: all(not tree.visualRect(index).isEmpty() for index in rows(tree))
+    )
+    clicked, activated = [], []
+    tree.file_clicked.connect(clicked.append)
+    tree.file_activated.connect(activated.append)
+    return clicked, activated
+
+
+def click(tree, index, button=Qt.MouseButton.LeftButton):
+    QTest.mouseClick(tree.viewport(), button, pos=tree.visualRect(index).center())
+
+
+def test_clicking_a_file_announces_it_to_look_at(tree, tmp_path, shown):
+    clicked, activated = shown
+    folder, file = rows(tree)
+
+    click(tree, folder)
+    click(tree, file, button=Qt.MouseButton.RightButton)
+    assert clicked == []
+
+    click(tree, file)
+    assert clicked == [tmp_path / "file.txt"]
+    # A single click is not the same as opening the file to work in.
+    assert activated == []
+
+
+def test_double_clicking_a_file_announces_it_to_work_in(
+    tree, tmp_path, shown, double_click
+):
+    clicked, activated = shown
+    folder, file = rows(tree)
+
+    double_click(tree.viewport(), tree.visualRect(folder).center())
+    double_click(tree.viewport(), tree.visualRect(file).center())
 
     assert activated == [tmp_path / "file.txt"]
 

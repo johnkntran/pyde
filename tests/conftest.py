@@ -295,3 +295,23 @@ def patiently():
                 time.sleep(pause)
 
     return patiently
+
+
+@pytest.fixture
+def double_click():
+    """Double-click a widget the way a mouse does.
+
+    Qt's own test function sends the double-click event alone. A mouse sends
+    a press and a release first, and a release after, and item views only
+    take the double-click as one if they have seen the first press.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    def double_click(widget, pos):
+        left = Qt.MouseButton.LeftButton
+        QTest.mouseClick(widget, left, pos=pos)
+        QTest.mouseDClick(widget, left, pos=pos)
+        QTest.mouseRelease(widget, left, pos=pos)
+
+    return double_click

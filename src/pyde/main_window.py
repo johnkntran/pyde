@@ -108,6 +108,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.file_tree = FileTree()
+        # A click shows a file and leaves the tree to be browsed on through. A
+        # double-click opens it to work in.
+        self.file_tree.file_clicked.connect(
+            lambda path: self.open_file(path, focus=False)
+        )
         self.file_tree.file_activated.connect(self.open_file)
         self.file_tree_dock = self._add_dock(
             "Files", "files", self.file_tree, Qt.DockWidgetArea.LeftDockWidgetArea
@@ -291,12 +296,17 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._offer_container()
 
-    def open_file(self, path: Path) -> CodeEditor | None:
-        """Show a file in a tab, reusing its tab if it is already open."""
+    def open_file(self, path: Path, focus: bool = True) -> CodeEditor | None:
+        """Show a file in a tab, reusing its tab if it is already open.
+
+        Keyboard focus moves to the file, unless `focus` is false.
+        """
         path = path.resolve()
         for editor in self.editors():
             if editor.path == path:
                 self.tabs.setCurrentWidget(editor.parentWidget())
+                if focus:
+                    self._focus_file()
                 return editor
 
         editor = CodeEditor()
@@ -307,7 +317,7 @@ class MainWindow(QMainWindow):
             self._report(f"Cannot open {path.name}: {reason}")
             editor.deleteLater()
             return None
-        self._add_tab(editor)
+        self._add_tab(editor, focus)
         return editor
 
     def new_file(self) -> None:
@@ -447,7 +457,7 @@ class MainWindow(QMainWindow):
 
     # Tabs and panels
 
-    def _add_tab(self, editor: CodeEditor) -> None:
+    def _add_tab(self, editor: CodeEditor, focus: bool = True) -> None:
         view = FileView(editor)
         self.tabs.addTab(view, "")
         editor.document().modificationChanged.connect(
@@ -455,7 +465,8 @@ class MainWindow(QMainWindow):
         )
         self._label_tab(editor)
         self.tabs.setCurrentWidget(view)
-        editor.setFocus()
+        if focus:
+            editor.setFocus()
 
     def _label_tab(self, editor: CodeEditor) -> None:
         index = self.tabs.indexOf(editor.parentWidget())
