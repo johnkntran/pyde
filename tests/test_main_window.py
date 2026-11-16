@@ -217,10 +217,83 @@ def test_open_path_tells_folders_from_files(window, file, tmp_path):
     assert tab_titles(window) == ["notes.txt"]
 
 
-def test_choosing_a_file_in_the_tree_opens_it(window, file):
+def test_choosing_a_file_in_the_tree_opens_it_to_type_in(window, file, wait_until):
+    show(window, wait_until)
+
     window.file_tree.file_activated.emit(file)
 
     assert tab_titles(window) == ["notes.txt"]
+    assert window.current_editor().hasFocus()
+
+
+def click_in_tree(window, wait_until, name, double_click=None):
+    """Click an entry at the top of the file tree, or double-click it with
+    the `double_click` fixture if given."""
+    tree = window.file_tree
+
+    def entry():
+        model, root = tree.model(), tree.rootIndex()
+        for row in range(model.rowCount(root)):
+            if model.index(row, 0, root).data() == name:
+                return model.index(row, 0, root)
+        return None
+
+    wait_until(lambda: entry() is not None and not tree.visualRect(entry()).isEmpty())
+    point = tree.visualRect(entry()).center()
+    if double_click is None:
+        QTest.mouseClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    else:
+        double_click(tree.viewport(), point)
+
+
+@pytest.fixture
+def two_files(tmp_path):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    for name in ("a.txt", "b.txt"):
+        (folder / name).write_text(f"{name}\n")
+    return folder
+
+
+def test_clicking_files_in_the_tree_shows_each_and_leaves_focus_there(
+    window, two_files, wait_until
+):
+    window.open_folder(two_files)
+    show(window, wait_until)
+    tree = window.file_tree
+
+    click_in_tree(window, wait_until, "a.txt")
+    assert tab_titles(window) == ["a.txt"]
+    assert tree.hasFocus()
+
+    click_in_tree(window, wait_until, "b.txt")
+    assert tab_titles(window) == ["a.txt", "b.txt"]
+    assert window.current_editor().path == two_files / "b.txt"
+    assert tree.hasFocus()
+
+    # A file already open is shown in its own tab.
+    click_in_tree(window, wait_until, "a.txt")
+    assert tab_titles(window) == ["a.txt", "b.txt"]
+    assert window.current_editor().path == two_files / "a.txt"
+    assert tree.hasFocus()
+
+
+def test_double_clicking_a_file_in_the_tree_opens_it_to_type_in(
+    window, two_files, wait_until, double_click
+):
+    window.open_folder(two_files)
+    show(window, wait_until)
+
+    click_in_tree(window, wait_until, "a.txt", double_click)
+
+    assert tab_titles(window) == ["a.txt"]
+    assert window.current_editor().hasFocus()
+
+    # And so does a double-click on a file that is open already.
+    click_in_tree(window, wait_until, "b.txt")
+    click_in_tree(window, wait_until, "a.txt", double_click)
+    assert window.current_editor().path == two_files / "a.txt"
+    assert window.current_editor().hasFocus()
 
 
 def test_open_file_and_open_folder_use_the_dialog_choice(

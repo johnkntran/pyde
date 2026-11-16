@@ -2,7 +2,13 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QDir, QModelIndex, QSortFilterProxyModel, Signal
+from PySide6.QtCore import (
+    QDir,
+    QModelIndex,
+    QSortFilterProxyModel,
+    Signal,
+    SignalInstance,
+)
 from PySide6.QtWidgets import QFileSystemModel, QTreeView, QWidget
 
 # Clutter that is never worth showing. Other dotfiles stay visible, because
@@ -24,7 +30,10 @@ class _FoldersFirst(QSortFilterProxyModel):
 
 
 class FileTree(QTreeView):
-    # The user opened a file, by double-clicking it or pressing Return on it.
+    # The user clicked a file, to look at it.
+    file_clicked = Signal(Path)
+    # The user opened a file to work in, by double-clicking it or pressing
+    # Return on it.
     file_activated = Signal(Path)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -38,7 +47,8 @@ class FileTree(QTreeView):
         self._sorted.sort(0)
 
         self.setHeaderHidden(True)
-        self.activated.connect(self._on_activated)
+        self.clicked.connect(lambda index: self._announce(index, self.file_clicked))
+        self.activated.connect(lambda index: self._announce(index, self.file_activated))
 
     def set_folder(self, folder: Path) -> None:
         """Show the contents of a folder."""
@@ -52,7 +62,8 @@ class FileTree(QTreeView):
         root = self._files.setRootPath(str(folder))
         self.setRootIndex(self._sorted.mapFromSource(root))
 
-    def _on_activated(self, index: QModelIndex) -> None:
+    def _announce(self, index: QModelIndex, signal: SignalInstance) -> None:
+        """Pass the path of the file at `index` to `signal`. Folders are passed over."""
         source = self._sorted.mapToSource(index)
         if not self._files.isDir(source):
-            self.file_activated.emit(Path(self._files.filePath(source)))
+            signal.emit(Path(self._files.filePath(source)))
