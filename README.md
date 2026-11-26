@@ -50,6 +50,14 @@ to find and press Return, and each line that matches is listed under its file.
   returns to your file.
 - The text is found as written, not as a pattern. Its case is ignored unless
   you tick **Match Case**.
+- To search only some of the files, list globs for them in the **Include**
+  field, with commas between: `*.py, *.toml`. To leave files out, list globs
+  for those in the **Exclude** field: `test_*.py`. Press Return in either
+  field to search again.
+- A glob matches a name in any folder, and a folder's name stands for all that
+  is in it: `tests` is every file under a folder called `tests`. Globs can
+  name folders too, as in `src/**/*.md`, and one that starts with `/` matches
+  only from the top of the folder you have open. Case is ignored.
 - In a Git repository, the files Git ignores are not searched. Nor are files
   that are not UTF-8 text, which Pyde could not open either.
 - Files are searched as they were last saved, so save to find what you have

@@ -9,7 +9,7 @@ from PySide6.QtTest import QTest
 
 from pyde import search
 from pyde.editor import CodeEditor
-from pyde.search import Match, Searcher, compile_query, find_in_file
+from pyde.search import Match, Searcher, compile_globs, compile_query, find_in_file
 
 
 def write(folder, name, text):
@@ -136,6 +136,89 @@ def test_a_match_far_along_a_long_line_is_shown_with_a_little_before_it(tmp_path
     assert len(text) == 1 + search.MAX_SHOWN
 
 
+# Which files
+
+
+def picked(globs, *paths):
+    """Those of the paths that the globs pick out."""
+    pattern = compile_globs(globs)
+    return [path for path in paths if pattern.match(path)]
+
+
+def test_a_glob_matches_a_files_name_in_any_folder():
+    paths = ["main.py", "src/pyde/search.py", "notes.txt", "src/main.pyc"]
+
+    assert picked("*.py", *paths) == ["main.py", "src/pyde/search.py"]
+    assert picked("test_*.py", "tests/test_search.py", "tests/conftest.py") == [
+        "tests/test_search.py"
+    ]
+    assert picked("data?.csv, [mn]*.txt", "data1.csv", "data10.csv", "notes.txt") == [
+        "data1.csv",
+        "notes.txt",
+    ]
+
+
+def test_a_glob_that_matches_a_folder_matches_all_that_is_in_it():
+    paths = ["tests/test_a.py", "src/tests/data/b.txt", "src/contests/c.py", "tests"]
+
+    assert picked("tests", *paths) == [
+        "tests/test_a.py",
+        "src/tests/data/b.txt",
+        "tests",
+    ]
+    # A slash on the end makes no difference.
+    assert picked("tests/", *paths) == picked("tests", *paths)
+
+
+def test_a_glob_with_folders_in_it_matches_them_at_any_depth():
+    paths = ["pyde/app.py", "src/pyde/app.py", "src/pyde/ui/app.py", "src/app.py"]
+
+    assert picked("pyde/*.py", *paths) == ["pyde/app.py", "src/pyde/app.py"]
+
+
+def test_a_glob_that_starts_with_a_slash_matches_from_the_top_of_the_folder():
+    paths = ["README.md", "docs/README.md", "src/docs/guide.md"]
+
+    assert picked("/README.md", *paths) == ["README.md"]
+    assert picked("/docs", *paths) == ["docs/README.md"]
+
+
+def test_two_stars_match_any_number_of_folders():
+    paths = ["src/a.md", "src/pyde/web/b.md", "docs/c.md", "src/pyde/d.py"]
+
+    assert picked("src/**/*.md", *paths) == ["src/a.md", "src/pyde/web/b.md"]
+
+
+def test_globs_are_separated_by_commas():
+    paths = ["a.py", "b.md", "c.txt"]
+
+    assert picked("*.py,*.md", *paths) == ["a.py", "b.md"]
+    # The space around them does not count, and nor does a gap between commas.
+    assert picked(" *.py , , *.md, ", *paths) == ["a.py", "b.md"]
+
+
+def test_no_globs_make_no_pattern():
+    assert compile_globs("") is None
+    assert compile_globs(" , ,") is None
+    assert compile_globs("/") is None
+
+
+def test_globs_ignore_case_and_match_names_that_start_with_a_dot():
+    assert picked("*.PY", "main.py", "SETUP.Py") == ["main.py", "SETUP.Py"]
+    assert picked("*.yml", ".github/workflows/ci.yml") == [".github/workflows/ci.yml"]
+    assert picked("*ignore", ".gitignore") == [".gitignore"]
+
+
+def test_a_backslash_in_a_glob_is_a_slash():
+    # As someone on Windows would type a folder.
+    assert picked("src\\pyde", "src/pyde/app.py", "src/app.py") == ["src/pyde/app.py"]
+
+
+def test_any_text_at_all_makes_a_pattern():
+    for globs in ("[", "[z-a]", "]", "{a,b}", "a**b", "(", "\\", "**", "//"):
+        compile_globs(globs)
+
+
 # A whole folder
 
 
@@ -165,9 +248,14 @@ class Harness:
         )
         self.searcher.finished.connect(self.finished.append)
 
-    def search(self, folder, query, match_case=False):
+    def search(self, folder, query, match_case=False, include="", exclude=""):
         """Start a search, and return the thread that carries it out."""
-        self.searcher.start(folder, compile_query(query, match_case))
+        self.searcher.start(
+            folder,
+            compile_query(query, match_case),
+            compile_globs(include),
+            compile_globs(exclude),
+        )
         return self.threads[-1]
 
 
@@ -254,6 +342,44 @@ def test_files_that_git_ignores_are_not_searched(harness, tmp_path, wait_until):
     wait_until(lambda: harness.finished)
 
     assert harness.found == [("source.txt", [1])]
+
+
+def test_only_the_files_included_are_searched(harness, tmp_path, wait_until, examined):
+    write(tmp_path, "notes.txt", "needle\n")
+    write(tmp_path, "main.py", "needle\n")
+    write(tmp_path, "src/code.py", "needle\n")
+
+    harness.search(tmp_path, "needle", include="*.py")
+    wait_until(lambda: harness.finished)
+
+    assert harness.found == [("main.py", [1]), ("src/code.py", [1])]
+    # The others are not so much as read.
+    assert examined.read_by("needle") == ["main.py", "code.py"]
+
+
+def test_the_files_excluded_are_not_searched(harness, tmp_path, wait_until, examined):
+    write(tmp_path, "main.py", "needle\n")
+    write(tmp_path, "tests/test_main.py", "needle\n")
+    write(tmp_path, "vendor/lib.py", "needle\n")
+
+    harness.search(tmp_path, "needle", exclude="test_*.py, vendor")
+    wait_until(lambda: harness.finished)
+
+    assert harness.found == [("main.py", [1])]
+    assert examined.read_by("needle") == ["main.py"]
+
+
+def test_a_file_both_included_and_excluded_is_not_searched(
+    harness, tmp_path, wait_until
+):
+    write(tmp_path, "main.py", "needle\n")
+    write(tmp_path, "test_main.py", "needle\n")
+    write(tmp_path, "test_notes.txt", "needle\n")
+
+    harness.search(tmp_path, "needle", include="*.py", exclude="test_*")
+    wait_until(lambda: harness.finished)
+
+    assert harness.found == [("main.py", [1])]
 
 
 def test_a_search_stops_at_the_limit_and_says_so(

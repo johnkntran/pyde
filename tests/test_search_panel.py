@@ -125,6 +125,46 @@ def test_match_case_searches_again(harness):
     assert harness.results() == [("src/code.py", ["10: print(NEEDLE, needle)"])]
 
 
+def test_the_search_is_narrowed_to_the_files_included(harness):
+    harness.panel.include.setText("*.py")
+
+    harness.search("needle")
+
+    assert [file for file, lines in harness.results()] == ["src/code.py"]
+    assert harness.panel.status.text() == "2 results in 1 file"
+
+
+def test_the_files_excluded_are_left_out_of_the_search(harness):
+    harness.panel.exclude.setText("src, *.md")
+
+    harness.search("needle")
+
+    assert [file for file, lines in harness.results()] == ["notes.txt"]
+
+
+def test_including_and_excluding_everything_finds_nothing(harness):
+    harness.panel.include.setText("*.txt")
+    harness.panel.exclude.setText("notes.*")
+
+    harness.search("needle")
+
+    assert harness.results() == []
+    assert harness.panel.status.text() == "No results"
+
+
+@pytest.mark.parametrize("field", ["include", "exclude"])
+def test_return_in_a_field_of_globs_searches_again(harness, field):
+    harness.search("needle")
+    assert len(harness.results()) == 2
+
+    getattr(harness.panel, field).setText("*.txt")
+    QTest.keyClick(getattr(harness.panel, field), Qt.Key.Key_Return)
+    harness._wait_until(lambda: not harness.panel.searching)
+
+    # The same file is all that is searched, or all that is not.
+    assert len(harness.results()) == 1
+
+
 def test_a_new_search_replaces_the_old_results(harness):
     harness.search("needle")
 
@@ -236,6 +276,27 @@ def test_down_moves_from_the_field_to_the_first_result(harness):
     assert harness.panel.results.currentItem() is harness.row(0, 0)
 
 
+def test_tab_moves_through_the_fields_in_the_order_they_are_in(harness):
+    harness.show()
+    harness.panel.start_typing()
+
+    QTest.keyClick(harness.panel.field, Qt.Key.Key_Tab)
+    assert harness.panel.include.hasFocus()
+
+    QTest.keyClick(harness.panel.include, Qt.Key.Key_Tab)
+    assert harness.panel.exclude.hasFocus()
+
+
+def test_down_moves_from_a_field_of_globs_to_the_results(harness):
+    harness.show()
+    harness.search("needle")
+    harness.panel.exclude.setFocus()
+
+    QTest.keyClick(harness.panel.exclude, Qt.Key.Key_Down)
+
+    assert harness.panel.results.hasFocus()
+
+
 def test_down_returns_to_the_result_that_was_current(harness):
     harness.show()
     harness.search("needle")
@@ -255,11 +316,13 @@ def test_down_stays_in_the_field_when_there_are_no_results(harness):
     assert harness.panel.field.hasFocus()
 
 
-def test_escape_in_the_field_or_the_results_asks_to_go_back(harness):
+def test_escape_in_a_field_or_the_results_asks_to_go_back(harness):
     QTest.keyClick(harness.panel.field, Qt.Key.Key_Escape)
+    QTest.keyClick(harness.panel.include, Qt.Key.Key_Escape)
+    QTest.keyClick(harness.panel.exclude, Qt.Key.Key_Escape)
     QTest.keyClick(harness.panel.results, Qt.Key.Key_Escape)
 
-    assert harness.dismissals == [True, True]
+    assert harness.dismissals == [True] * 4
 
 
 # Drawing a result

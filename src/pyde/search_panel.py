@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pyde.search import Match, Searcher, compile_query
+from pyde.search import Match, Searcher, compile_globs, compile_query
 
 # Where a result's row keeps its Match. A file's row has none.
 MATCH_ROLE = Qt.ItemDataRole.UserRole
@@ -30,7 +30,9 @@ MARGIN = 6
 class SearchPanel(QWidget):
     """A field to search the open folder's files, over a list of the results.
 
-    The results are grouped by file, one row for each line that matches.
+    Beside it are two fields for globs, which narrow the search to some of the
+    files and leave others out of it. The results are grouped by file, one row
+    for each line that matches.
     """
 
     # The user chose a result: the file, its line counted from 1, and the
@@ -52,6 +54,16 @@ class SearchPanel(QWidget):
         self._searcher.finished.connect(self._finished)
 
         self.field = QLineEdit(placeholderText="Find in files")
+        # Globs for the files to search, and for the files to leave out.
+        # Once a field is filled in, its tip is all that says which it is.
+        self.include = QLineEdit(
+            placeholderText="Include, e.g. *.py",
+            toolTip="Search only the files that match these globs, e.g. *.py, src",
+        )
+        self.exclude = QLineEdit(
+            placeholderText="Exclude, e.g. test_*.py",
+            toolTip="Leave out the files that match these globs, e.g. test_*.py, docs",
+        )
         self.match_case = QCheckBox("Match Case")
         self.status = QLabel()
         self.results = QTreeWidget()
@@ -64,7 +76,9 @@ class SearchPanel(QWidget):
         self._code_font.setPointSizeF(self.results.font().pointSizeF())
 
         top = QHBoxLayout()
-        top.addWidget(self.field, stretch=1)
+        top.addWidget(self.field, stretch=2)
+        top.addWidget(self.include, stretch=1)
+        top.addWidget(self.exclude, stretch=1)
         top.addWidget(self.match_case)
         top.addSpacing(2 * MARGIN)
         top.addWidget(self.status)
@@ -74,10 +88,11 @@ class SearchPanel(QWidget):
         layout.addLayout(top)
         layout.addWidget(self.results)
 
-        self.field.returnPressed.connect(self.search)
+        for field in (self.field, self.include, self.exclude):
+            field.returnPressed.connect(self.search)
+            field.installEventFilter(self)
         self.match_case.toggled.connect(self.search)
         self.results.itemDoubleClicked.connect(self._open)
-        self.field.installEventFilter(self)
         self.results.installEventFilter(self)
 
     @property
@@ -97,7 +112,10 @@ class SearchPanel(QWidget):
         self.field.selectAll()
 
     def search(self) -> None:
-        """Search the folder for the text in the field, replacing the results."""
+        """Search the folder for the text in the field, replacing the results.
+
+        Only the files that the globs to include and to exclude leave in.
+        """
         self._clear()
         query = self.field.text()
         if not query or self._folder is None:
@@ -106,20 +124,25 @@ class SearchPanel(QWidget):
         self._delegate.pattern = pattern
         self._query_length = len(query)
         self.status.setText("Searching…")
-        self._searcher.start(self._folder, pattern)
+        self._searcher.start(
+            self._folder,
+            pattern,
+            compile_globs(self.include.text()),
+            compile_globs(self.exclude.text()),
+        )
 
     def shutdown(self) -> None:
         """Stop any search. Call before the window goes away."""
         self._searcher.cancel()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        """Handle the keys that move between the field, the results, and a file."""
+        """Handle the keys that move between the fields, the results, and a file."""
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key == Qt.Key.Key_Escape:
                 self.dismissed.emit()
                 return True
-            if watched is self.field and key == Qt.Key.Key_Down:
+            if watched is not self.results and key == Qt.Key.Key_Down:
                 self._focus_results()
                 return True
             # Qt leaves Return in a list to the platform, and on macOS it does
