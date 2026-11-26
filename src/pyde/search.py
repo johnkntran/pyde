@@ -1,5 +1,6 @@
 """Searching the text of every file in a folder, for Find in Files."""
 
+import glob
 import re
 import threading
 from dataclasses import dataclass
@@ -38,6 +39,31 @@ class Match:
 def compile_query(query: str, match_case: bool) -> re.Pattern[str]:
     """A pattern that finds the query as plain text, not as an expression."""
     return re.compile(re.escape(query), 0 if match_case else re.IGNORECASE)
+
+
+def compile_globs(globs: str) -> re.Pattern[str] | None:
+    """A pattern that matches the paths picked out by globs, or None for no globs.
+
+    The globs are separated by commas, and the paths are relative ones, as
+    `list_files` gives them. A glob may match a file or a folder, and one that
+    matches a folder matches everything in it. It matches at any depth, unless
+    it starts with "/", which holds it to the top of the folder searched:
+    "*.py" is the Python files anywhere, "tests" all there is in any folder of
+    that name, and "/docs/**/*.md" the Markdown files under the docs folder at
+    the top. Case is ignored, as the file systems of macOS and Windows ignore
+    it.
+    """
+    expressions = []
+    for one in globs.replace("\\", "/").split(","):
+        one = one.strip()
+        anywhere = "" if one.startswith("/") else "**/"
+        one = one.strip("/")
+        if one:
+            for whole in (anywhere + one, anywhere + one + "/**"):
+                expressions.append(
+                    glob.translate(whole, recursive=True, include_hidden=True, seps="/")
+                )
+    return re.compile("|".join(expressions), re.IGNORECASE) if expressions else None
 
 
 def find_in_file(path: Path, pattern: re.Pattern[str]) -> list[Match]:
@@ -110,12 +136,24 @@ class Searcher(QObject):
     def running(self) -> bool:
         return self._stop is not None
 
-    def start(self, folder: Path, pattern: re.Pattern[str]) -> None:
-        """Search the folder's files, in place of any search still going."""
+    def start(
+        self,
+        folder: Path,
+        pattern: re.Pattern[str],
+        include: re.Pattern[str] | None = None,
+        exclude: re.Pattern[str] | None = None,
+    ) -> None:
+        """Search the folder's files, in place of any search still going.
+
+        With `include`, only the files whose paths it matches are searched,
+        and with `exclude`, none of those it matches; see `compile_globs`.
+        """
         self.cancel()
         self._stop = stop = threading.Event()
         threading.Thread(
-            target=self._search, args=(stop, folder, pattern), daemon=True
+            target=self._search,
+            args=(stop, folder, pattern, include, exclude),
+            daemon=True,
         ).start()
 
     def cancel(self) -> None:
@@ -125,7 +163,12 @@ class Searcher(QObject):
             self._stop = None
 
     def _search(
-        self, stop: threading.Event, folder: Path, pattern: re.Pattern[str]
+        self,
+        stop: threading.Event,
+        folder: Path,
+        pattern: re.Pattern[str],
+        include: re.Pattern[str] | None,
+        exclude: re.Pattern[str] | None,
     ) -> None:
         """Do the search. Runs on its own thread.
 
@@ -135,6 +178,10 @@ class Searcher(QObject):
         """
         count = 0
         for relative_path in list_files(folder):
+            if include and not include.match(relative_path):
+                continue
+            if exclude and exclude.match(relative_path):
+                continue
             matches = find_in_file(folder / relative_path, pattern)
             if stop.is_set():
                 return
